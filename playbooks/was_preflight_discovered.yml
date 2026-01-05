@@ -1,0 +1,168 @@
+---
+- name: Preflight WAS stop/start (discovery + access checks, no changes)
+  hosts: was_all_nodes
+  gather_facts: false
+
+  vars:
+    # If true, we assert if discovery finds nothing (helps catch bad was_node_name vars or limits)
+    was_preflight_fail_if_no_targets: true
+
+  tasks:
+    - name: Show which hosts are in scope (AAP limit)
+      ansible.builtin.debug:
+        msg:
+          - "ansible_play_hosts={{ ansible_play_hosts }}"
+          - "inventory_hostname={{ inventory_hostname }}"
+      run_once: true
+
+    - name: Validate host var was_node_name exists for each limited host
+      ansible.builtin.assert:
+        that:
+          - was_node_name is defined
+          - was_node_name | length > 0
+        fail_msg: "Host {{ inventory_hostname }} missing was_node_name"
+      # runs per host in the limit set
+
+    - name: Check node profile paths exist (no execution)
+      ansible.builtin.stat:
+        path: "{{ was_node_profile_path }}/bin"
+      register: node_bin_stat
+
+    - name: Assert node profile bin exists
+      ansible.builtin.assert:
+        that:
+          - node_bin_stat.stat.exists
+          - node_bin_stat.stat.isdir
+        fail_msg: "Missing node profile bin on {{ inventory_hostname }}: {{ was_node_profile_path }}/bin"
+
+    - name: Check startNode.sh exists (no execution)
+      ansible.builtin.stat:
+        path: "{{ was_node_profile_path }}/bin/startNode.sh"
+      register: startnode_stat
+
+    - name: Check stopNode.sh exists (no execution)
+      ansible.builtin.stat:
+        path: "{{ was_node_profile_path }}/bin/stopNode.sh"
+      register: stopnode_stat
+
+    - name: Assert nodeagent scripts exist
+      ansible.builtin.assert:
+        that:
+          - startnode_stat.stat.exists
+          - stopnode_stat.stat.exists
+        fail_msg: "Missing start/stop node scripts on {{ inventory_hostname }} under {{ was_node_profile_path }}/bin"
+
+    - name: Check DMGR profile bin exists (SSH + path sanity)
+      ansible.builtin.stat:
+        path: "{{ was_dmgr_profile }}/bin/wsadmin.sh"
+      register: dmgr_wsadmin_stat
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+
+    - name: Assert wsadmin.sh exists on DMGR
+      ansible.builtin.assert:
+        that:
+          - dmgr_wsadmin_stat.stat.exists
+        fail_msg: "wsadmin.sh not found on DMGR at {{ was_dmgr_profile }}/bin/wsadmin.sh"
+      run_once: true
+
+    - name: Copy wsadmin scripts to DMGR profile bin
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
+        mode: "0755"
+      loop:
+        - discover_targets.py
+        - server_state.py
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+
+    - name: Build node list from limited hosts
+      ansible.builtin.set_fact:
+        was_nodes_in_scope: "{{ ansible_play_hosts | map('extract', hostvars, 'was_node_name') | list | unique }}"
+      run_once: true
+
+    - name: Run discovery via DMGR (no changes)
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        cd "{{ was_dmgr_profile }}/bin" &&
+        ./wsadmin.sh
+        -lang jython
+        -user "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+        -f "./discover_targets.py"
+        --nodes {{ was_nodes_in_scope | join(' ') }}
+      args:
+        executable: /bin/bash
+      register: discovery_out
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+      changed_when: false
+      failed_when: discovery_out.rc != 0
+
+    - name: Parse discovered targets
+      ansible.builtin.set_fact:
+        was_discovered_targets_all: "{{ (discovery_out.stdout | from_json).targets }}"
+      run_once: true
+
+    - name: Filter discovered targets to nodes in scope
+      ansible.builtin.set_fact:
+        was_discovered_targets: >-
+          {{
+            was_discovered_targets_all
+            | selectattr('server', 'defined')
+            | selectattr('node', 'in', was_nodes_in_scope)
+            | list
+            | sort(attribute='node')
+          }}
+      run_once: true
+
+    - name: Fail if no targets found (optional)
+      when: was_preflight_fail_if_no_targets | bool
+      ansible.builtin.assert:
+        that:
+          - was_discovered_targets | length > 0
+        fail_msg: >-
+          Discovery returned zero application servers for nodes {{ was_nodes_in_scope }}.
+          Check was_node_name host_vars and DMGR visibility.
+      run_once: true
+
+    - name: Show what would be stopped/started
+      ansible.builtin.debug:
+        msg:
+          - "Nodes in scope: {{ was_nodes_in_scope }}"
+          - "Discovered targets (node/server):"
+          - "{{ was_discovered_targets | map(attribute='node') | list }}"
+      run_once: true
+
+    - name: Pretty print discovered targets
+      ansible.builtin.debug:
+        var: was_discovered_targets
+      run_once: true
+
+    - name: Query runtime state for each discovered server (safe)
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        cd "{{ was_dmgr_profile }}/bin" &&
+        ./wsadmin.sh
+        -lang jython
+        -user "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+        -f "./server_state.py"
+        --node "{{ item.node }}"
+        --server "{{ item.server }}"
+      args:
+        executable: /bin/bash
+      register: state_out
+      delegate_to: "{{ was_dmgr_host }}"
+      loop: "{{ was_discovered_targets }}"
+      loop_control:
+        label: "{{ item.node }}/{{ item.server }}"
+      run_once: true
+      changed_when: false
+      failed_when: state_out.rc != 0
+
+    - name: Summarize states (node/server -> state)
+      ansible.builtin.debug:
+        msg: "{{ state_out.results | map(attribute='stdout') | list }}"
+      run_once: true

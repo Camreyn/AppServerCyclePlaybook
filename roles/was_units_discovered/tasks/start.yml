@@ -1,0 +1,62 @@
+---
+- name: Start nodeagent on each limited host (optional but recommended)
+  when: was_start_nodeagent | bool
+  ansible.builtin.shell: >
+    set -euo pipefail &&
+    "{{ was_node_profile_path }}/bin/startNode.sh"
+  args:
+    executable: /bin/bash
+  register: nodeagent_start
+  changed_when: nodeagent_start.rc == 0
+  failed_when: nodeagent_start.rc != 0 and ("ADMU0116I" not in (nodeagent_start.stdout | default('')))
+
+- name: Build node list from limited hosts
+  ansible.builtin.set_fact:
+    was_nodes_in_scope: "{{ ansible_play_hosts | map('extract', hostvars, 'was_node_name') | list | unique }}"
+  run_once: true
+
+- name: Discover application servers for nodes in scope via DMGR
+  ansible.builtin.include_role:
+    name: was_wsadmin
+  vars:
+    was_wsadmin_script: "discover_targets.py"
+    was_wsadmin_args: ["--nodes"] + was_nodes_in_scope
+  run_once: true
+
+- name: Parse discovered targets
+  ansible.builtin.set_fact:
+    was_discovered_targets_all: "{{ (wsadmin_run.stdout | from_json).targets }}"
+  run_once: true
+
+- name: Filter discovered targets to nodes in scope
+  ansible.builtin.set_fact:
+    was_discovered_targets: >-
+      {{
+        was_discovered_targets_all
+        | selectattr('server', 'defined')
+        | selectattr('node', 'in', was_nodes_in_scope)
+        | list
+        | sort(attribute='node')
+      }}
+  run_once: true
+
+- name: Start discovered application servers (one at a time)
+  ansible.builtin.include_role:
+    name: was_wsadmin
+  vars:
+    was_wsadmin_script: "control_server.py"
+    was_wsadmin_args:
+      - --action
+      - start
+      - --node
+      - "{{ item.node }}"
+      - --server
+      - "{{ item.server }}"
+      - --timeout
+      - "{{ was_poll_timeout_sec }}"
+      - --delay
+      - "{{ was_poll_delay_sec }}"
+  loop: "{{ was_discovered_targets }}"
+  loop_control:
+    label: "{{ item.node }}/{{ item.server }}"
+  run_once: true

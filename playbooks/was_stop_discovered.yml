@@ -1,0 +1,9 @@
+---
+- name: Stop discovered WAS application servers on limited tier hosts
+  hosts: was_all_nodes
+  gather_facts: false
+  serial: 1   # host-by-host safety (you can change to 2 if you have >2 nodes and want speed)
+  tasks:
+    - ansible.builtin.include_role:
+        name: was_units_discovered
+        tasks_from: stop.yml

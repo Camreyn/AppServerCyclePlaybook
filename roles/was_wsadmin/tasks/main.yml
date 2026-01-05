@@ -1,0 +1,28 @@
+---
+- name: Copy wsadmin scripts to DMGR profile bin (run once)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
+    mode: "0755"
+  loop:
+    - discover_targets.py
+    - control_server.py
+  delegate_to: "{{ was_dmgr_host }}"
+  run_once: true
+
+- name: Run wsadmin script {{ was_wsadmin_script }} with args {{ was_wsadmin_args | default([]) }}
+  ansible.builtin.shell: >
+    set -euo pipefail &&
+    cd "{{ was_dmgr_profile }}/bin" &&
+    ./wsadmin.sh
+    -lang jython
+    -user "{{ was_wsadmin_user }}"
+    -password "{{ was_wsadmin_pass }}"
+    -f "./{{ was_wsadmin_script }}"
+    {% for a in was_wsadmin_args | default([]) %} {{ a }} {% endfor %}
+  args:
+    executable: /bin/bash
+  register: wsadmin_run
+  delegate_to: "{{ was_dmgr_host }}"
+  changed_when: false
+  failed_when: wsadmin_run.rc != 0

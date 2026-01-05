@@ -1,0 +1,9 @@
+---
+- name: Start discovered WAS application servers on limited tier hosts
+  hosts: was_all_nodes
+  gather_facts: false
+  serial: 1
+  tasks:
+    - ansible.builtin.include_role:
+        name: was_units_discovered
+        tasks_from: start.yml
