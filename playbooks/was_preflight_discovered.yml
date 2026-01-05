@@ -15,6 +15,19 @@
           - "inventory_hostname={{ inventory_hostname }}"
       run_once: true
 
+    - name: Validate DMGR vars
+      ansible.builtin.assert:
+        that:
+          - was_dmgr_host is defined
+          - was_dmgr_profile is defined
+          - was_wsadmin_user is defined
+          - was_wsadmin_pass is defined
+        fail_msg: >
+          Missing required DMGR variables.
+          Ensure was_dmgr_host, was_dmgr_profile, was_wsadmin_user,
+          and was_wsadmin_pass are provided via inventory or survey.
+      run_once: true
+
     - name: Validate host var was_node_name exists for each limited host
       ansible.builtin.assert:
         that:
