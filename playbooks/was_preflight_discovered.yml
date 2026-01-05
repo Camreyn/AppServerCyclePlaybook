@@ -66,15 +66,10 @@
         fail_msg: "wsadmin.sh not found on DMGR at {{ was_dmgr_profile }}/bin/wsadmin.sh"
       run_once: true
 
-    - name: Copy wsadmin scripts to DMGR profile bin
-      ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
-        mode: "0755"
-      loop:
-        - discover_targets.py
-        - server_state.py
-      delegate_to: "{{ was_dmgr_host }}"
+    - name: Stage wsadmin scripts to DMGR (safe)
+      ansible.builtin.include_role:
+        name: was_wsadmin
+        tasks_from: stage_scripts.yml
       run_once: true
 
     - name: Build node list from limited hosts
