@@ -1,0 +1,12 @@
+---
+- name: Ensure wsadmin scripts are present on DMGR
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
+    mode: "0755"
+  loop:
+    - discover_targets.py
+    - server_state.py
+    - control_server.py
+  delegate_to: "{{ was_dmgr_host }}"
+  run_once: true
