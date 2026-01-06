@@ -2,8 +2,149 @@
 - name: Stop discovered WAS application servers on limited tier hosts
   hosts: was_all_nodes
   gather_facts: false
-  serial: 1   # host-by-host safety (you can change to 2 if you have >2 nodes and want speed)
+  serial: 1
+
   tasks:
-    - ansible.builtin.include_role:
-        name: was_units_discovered
-        tasks_from: stop.yml
+    - name: Safety check – require explicit approval for disruptive actions
+      ansible.builtin.assert:
+        that:
+          - was_allow_disruptive | default(false) | bool
+        fail_msg: >
+          Disruptive actions are disabled.
+          Set was_allow_disruptive=true (survey/extra vars) to proceed.
+      run_once: true
+
+    - name: Validate required vars (DMGR + node)
+      ansible.builtin.assert:
+        that:
+          - was_dmgr_host is defined
+          - was_dmgr_profile is defined
+          - was_wsadmin_user is defined
+          - was_wsadmin_pass is defined
+          - was_node_profile_path is defined
+          - was_node_profile_path | length > 0
+          - was_node_name is defined
+          - was_node_name | length > 0
+        fail_msg: >
+          Missing required variables. Ensure DMGR vars (was_dmgr_host, was_dmgr_profile,
+          was_wsadmin_user, was_wsadmin_pass) and per-host node vars (was_node_profile_path,
+          was_node_name) are set via inventory or survey.
+
+    - name: Stage wsadmin scripts to DMGR (safe)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
+        dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
+        mode: "0755"
+      loop:
+        - discover_targets.py
+        - server_state.py
+        - control_server.py
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+
+    # ------------------------------------------------------------
+    # Discover targets for the LIMITED hosts (same approach as working preflight)
+    # ------------------------------------------------------------
+    - name: Build node list from limited hosts
+      ansible.builtin.set_fact:
+        was_nodes_in_scope: >-
+          {{
+            ansible_play_hosts
+            | map('extract', hostvars, 'was_node_name')
+            | list
+            | unique
+          }}
+      run_once: true
+
+    - name: Discover application servers via DMGR (safe)
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        cd "{{ was_dmgr_profile }}/bin" &&
+        ./wsadmin.sh -quiet
+        -lang jython
+        -user "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+        -f "./discover_targets.py"
+        --nodes {{ was_nodes_in_scope | join(' ') }}
+      args:
+        executable: /bin/bash
+      register: discovery_out
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+      changed_when: false
+      failed_when: discovery_out.rc != 0
+
+    - name: Extract JSON payload candidates from wsadmin output
+      ansible.builtin.set_fact:
+        was_discovery_json_candidates: "{{ (discovery_out.stdout | string) | regex_findall('(?s)\\{.*?\\}(?=\\s*$)') }}"
+      run_once: true
+
+    - name: Assert JSON payload was found in wsadmin output
+      ansible.builtin.assert:
+        that:
+          - was_discovery_json_candidates | length > 0
+        fail_msg: >
+          wsadmin output did not contain a trailing JSON object.
+          First 800 chars:
+          {{ (discovery_out.stdout | string)[:800] }}
+      run_once: true
+
+    - name: Parse discovery JSON payload (last candidate)
+      ansible.builtin.set_fact:
+        was_discovery_json: "{{ (was_discovery_json_candidates | last | string) | from_json }}"
+      run_once: true
+
+    - name: Build discovered target list
+      ansible.builtin.set_fact:
+        was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
+      run_once: true
+
+    - name: Filter discovered targets to nodes in scope
+      ansible.builtin.set_fact:
+        was_discovered_targets: >-
+          {{
+            was_discovered_targets_all
+            | selectattr('server', 'defined')
+            | selectattr('node', 'in', was_nodes_in_scope)
+            | list
+            | sort(attribute='node')
+          }}
+      run_once: true
+
+    - name: Stop discovered application servers (one at a time)
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        cd "{{ was_dmgr_profile }}/bin" &&
+        ./wsadmin.sh -quiet
+        -lang jython
+        -user "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+        -f "./control_server.py"
+        --action stop
+        --node "{{ item.node }}"
+        --server "{{ item.server }}"
+        --timeout "{{ was_poll_timeout_sec | default(600) }}"
+        --delay "{{ was_poll_delay_sec | default(5) }}"
+      args:
+        executable: /bin/bash
+      register: stop_out
+      delegate_to: "{{ was_dmgr_host }}"
+      loop: "{{ was_discovered_targets }}"
+      loop_control:
+        label: "{{ item.node }}/{{ item.server }}"
+      run_once: true
+      changed_when: "'CHANGED:true' in (stop_out.stdout | default(''))"
+      failed_when: stop_out.rc != 0
+
+    - name: Stop nodeagent on each limited host (optional)
+      when: was_stop_nodeagent | default(true) | bool
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        "{{ was_node_profile_path }}/bin/stopNode.sh"
+        -username "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+      args:
+        executable: /bin/bash
+      register: nodeagent_stop
+      changed_when: nodeagent_stop.rc == 0
+      failed_when: nodeagent_stop.rc != 0 and ("ADMU" not in (nodeagent_stop.stdout | default('')))
