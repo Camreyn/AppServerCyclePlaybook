@@ -7,9 +7,6 @@
     was_preflight_fail_if_no_targets: true
 
   tasks:
-    # ------------------------------------------------------------
-    # Context / visibility
-    # ------------------------------------------------------------
     - name: Show which hosts are in scope (AAP limit)
       ansible.builtin.debug:
         msg:
@@ -17,9 +14,6 @@
           - "inventory_hostname={{ inventory_hostname }}"
       run_once: true
 
-    # ------------------------------------------------------------
-    # HARD FAIL EARLY IF REQUIRED VARS ARE MISSING
-    # ------------------------------------------------------------
     - name: Validate required DMGR vars
       ansible.builtin.assert:
         that:
@@ -44,11 +38,7 @@
         fail_msg: >
           Missing required node variables on {{ inventory_hostname }}.
           Ensure was_node_profile_path and was_node_name are set.
-      # per-host
 
-    # ------------------------------------------------------------
-    # Per-host validation (node side)
-    # ------------------------------------------------------------
     - name: Check node profile bin exists (no execution)
       ansible.builtin.stat:
         path: "{{ was_node_profile_path }}/bin"
@@ -80,9 +70,6 @@
           Missing startNode.sh or stopNode.sh under
           {{ was_node_profile_path }}/bin on {{ inventory_hostname }}
 
-    # ------------------------------------------------------------
-    # DMGR-side checks
-    # ------------------------------------------------------------
     - name: Check DMGR wsadmin.sh exists
       ansible.builtin.stat:
         path: "{{ was_dmgr_profile }}/bin/wsadmin.sh"
@@ -97,9 +84,6 @@
         fail_msg: "wsadmin.sh not found at {{ was_dmgr_profile }}/bin/wsadmin.sh"
       run_once: true
 
-    # ------------------------------------------------------------
-    # STAGE WSADMIN SCRIPTS (NO ROLES, FAST FIX)
-    # ------------------------------------------------------------
     - name: Stage wsadmin scripts to DMGR (safe)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
@@ -112,9 +96,6 @@
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
 
-    # ------------------------------------------------------------
-    # Discovery
-    # ------------------------------------------------------------
     - name: Build node list from limited hosts
       ansible.builtin.set_fact:
         was_nodes_in_scope: >-
@@ -144,9 +125,15 @@
       changed_when: false
       failed_when: discovery_out.rc != 0
 
+    # ---- CRITICAL: force JSON parsing here so errors are obvious ----
+    - name: Parse discovery JSON
+      ansible.builtin.set_fact:
+        was_discovery_json: "{{ discovery_out.stdout | trim | from_json }}"
+      run_once: true
+
     - name: Parse discovered targets
       ansible.builtin.set_fact:
-        was_discovered_targets_all: "{{ (discovery_out.stdout | from_json).targets }}"
+        was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
       run_once: true
 
     - name: Filter discovered targets to nodes in scope
@@ -171,9 +158,6 @@
           {{ was_nodes_in_scope }}.
       run_once: true
 
-    # ------------------------------------------------------------
-    # Reporting
-    # ------------------------------------------------------------
     - name: Show what would be stopped/started
       ansible.builtin.debug:
         var: was_discovered_targets
