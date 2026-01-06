@@ -125,24 +125,24 @@
       changed_when: false
       failed_when: discovery_out.rc != 0
     
-    - name: Extract JSON payload from wsadmin output
+    - name: Extract JSON payload candidates from wsadmin output
       ansible.builtin.set_fact:
-        was_discovery_json_str: "{{ discovery_out.stdout | regex_search('(?s)\\{.*\\}\\s*$', '\\0') | default('') }}"
+        was_discovery_json_candidates: "{{ (discovery_out.stdout | string) | regex_findall('(?s)\\{.*?\\}(?=\\s*$)') }}"
       run_once: true
 
     - name: Assert JSON payload was found in wsadmin output
       ansible.builtin.assert:
         that:
-          - was_discovery_json_str | length > 0
+          - was_discovery_json_candidates | length > 0
         fail_msg: >
           wsadmin output did not contain a trailing JSON object.
-          First 500 chars:
-          {{ discovery_out.stdout[:500] }}
+          First 800 chars:
+          {{ (discovery_out.stdout | string)[:800] }}
       run_once: true
 
-    - name: Parse discovery JSON payload
+    - name: Parse discovery JSON payload (last candidate)
       ansible.builtin.set_fact:
-        was_discovery_json: "{{ was_discovery_json_str | from_json }}"
+        was_discovery_json: "{{ (was_discovery_json_candidates | last | string) | from_json }}"
       run_once: true
 
     - name: Parse discovered targets
