@@ -125,7 +125,6 @@
       changed_when: false
       failed_when: discovery_out.rc != 0
 
-    # ---- CRITICAL: force JSON parsing here so errors are obvious ----
     - name: Parse discovery JSON
       ansible.builtin.set_fact:
         was_discovery_json: "{{ discovery_out.stdout | trim | from_json }}"
