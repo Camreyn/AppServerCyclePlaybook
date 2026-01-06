@@ -131,8 +131,7 @@
       run_once: true
 
     - name: Parse discovered targets
-      ansible.builtin.set_fact:
-        was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
+      ansible.builtin.set_fact: { was_discovered_targets_all: "{{ was_discovery_json['targets'] | default([]) }}" }
       run_once: true
 
     - name: Filter discovered targets to nodes in scope
