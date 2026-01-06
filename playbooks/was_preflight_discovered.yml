@@ -18,9 +18,9 @@
       run_once: true
 
     # ------------------------------------------------------------
-    # HARD FAIL EARLY IF REQUIRED DMGR VARS ARE MISSING
+    # HARD FAIL EARLY IF REQUIRED VARS ARE MISSING
     # ------------------------------------------------------------
-    - name: Validate DMGR vars
+    - name: Validate required DMGR vars
       ansible.builtin.assert:
         that:
           - was_dmgr_host is defined
@@ -34,16 +34,21 @@
           via inventory or survey.
       run_once: true
 
+    - name: Validate required node vars
+      ansible.builtin.assert:
+        that:
+          - was_node_profile_path is defined
+          - was_node_profile_path | length > 0
+          - was_node_name is defined
+          - was_node_name | length > 0
+        fail_msg: >
+          Missing required node variables on {{ inventory_hostname }}.
+          Ensure was_node_profile_path and was_node_name are set.
+      # per-host
+
     # ------------------------------------------------------------
     # Per-host validation (node side)
     # ------------------------------------------------------------
-    - name: Validate host var was_node_name exists
-      ansible.builtin.assert:
-        that:
-          - was_node_name is defined
-          - was_node_name | length > 0
-        fail_msg: "Host {{ inventory_hostname }} missing was_node_name"
-
     - name: Check node profile bin exists (no execution)
       ansible.builtin.stat:
         path: "{{ was_node_profile_path }}/bin"
