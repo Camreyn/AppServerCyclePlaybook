@@ -1,0 +1,32 @@
+---
+- name: Reboot limited tier hosts (OS reboot between WAS stop/start)
+  hosts: was_all_nodes
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    - name: Safety check – require explicit approval for disruptive actions
+      ansible.builtin.assert:
+        that:
+          - was_allow_disruptive | default(false) | bool
+        fail_msg: >
+          Disruptive actions are disabled.
+          Set was_allow_disruptive=true (survey/extra vars) to proceed.
+      run_once: true
+
+    - name: Wait for SSH connectivity (pre-reboot)
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ was_reboot_precheck_timeout_sec | default(120) }}"
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        msg: "AAP-triggered reboot (between WAS stop/start)"
+        reboot_timeout: "{{ was_reboot_timeout_sec | default(1800) }}"
+        connect_timeout: "{{ was_reboot_connect_timeout_sec | default(10) }}"
+        pre_reboot_delay: "{{ was_reboot_pre_delay_sec | default(0) }}"
+        post_reboot_delay: "{{ was_reboot_post_delay_sec | default(10) }}"
+        test_command: "{{ was_reboot_test_command | default('whoami') }}"
+
+    - name: Wait for SSH connectivity (post-reboot)
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ was_reboot_postcheck_timeout_sec | default(300) }}"
