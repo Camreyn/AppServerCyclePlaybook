@@ -141,5 +141,34 @@
       loop_control:
         label: "{{ item.node }}/{{ item.server }}"
       run_once: true
-      changed_when: "'CHANGED:true' in (start_out.stdout | default(''))"
+      changed_when: >
+        (start_out.stdout | default('')) is search('CHANGED:true')
       failed_when: start_out.rc != 0
+
+    - name: Verify discovered servers are RUNNING/STARTED (optional)
+      when: was_verify_after_start | default(true) | bool
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        cd "{{ was_dmgr_profile }}/bin" &&
+        ./wsadmin.sh -quiet
+        -lang jython
+        -user "{{ was_wsadmin_user }}"
+        -password "{{ was_wsadmin_pass }}"
+        -f "./server_state.py"
+        --node "{{ item.node }}"
+        --server "{{ item.server }}"
+      args:
+        executable: /bin/bash
+      register: verify_out
+      delegate_to: "{{ was_dmgr_host }}"
+      loop: "{{ was_discovered_targets }}"
+      loop_control:
+        label: "{{ item.node }}/{{ item.server }}"
+      run_once: true
+      changed_when: false
+      failed_when: >
+        verify_out.rc != 0 or
+        (
+          (verify_out.stdout | default('')) is not search('=RUNNING') and
+          (verify_out.stdout | default('')) is not search('=STARTED')
+        )
