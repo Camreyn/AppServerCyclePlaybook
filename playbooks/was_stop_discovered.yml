@@ -42,9 +42,6 @@
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
 
-    # ------------------------------------------------------------
-    # Discover targets for the LIMITED hosts (same approach as working preflight)
-    # ------------------------------------------------------------
     - name: Build node list from limited hosts
       ansible.builtin.set_fact:
         was_nodes_in_scope: >-
@@ -133,7 +130,8 @@
       loop_control:
         label: "{{ item.node }}/{{ item.server }}"
       run_once: true
-      changed_when: "'CHANGED:true' in (stop_out.stdout | default(''))"
+      changed_when: >
+        (stop_out.stdout | default('')) is search('CHANGED:true')
       failed_when: stop_out.rc != 0
 
     - name: Stop nodeagent on each limited host (optional)
