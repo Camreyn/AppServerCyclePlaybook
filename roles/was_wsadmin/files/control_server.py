@@ -15,6 +15,12 @@ SERVER  = _arg("--server")
 TIMEOUT = int(_arg("--timeout", "600"))
 DELAY   = int(_arg("--delay", "5"))
 
+_ALREADY_DOWN_SUBSTRINGS = [
+    "Unable to locate running server",
+    "is not running",
+    "not running",
+]
+
 def _server_mbean(node, server):
     # For application servers
     query = "type=Server,node=%s,process=%s,*" % (node, server)
@@ -40,6 +46,13 @@ def _wait_for(node, server, desired_states):
                             (node, server, ",".join(desired_states), st))
         time.sleep(DELAY)
 
+def _is_already_down_exception(exc):
+    msg = str(exc) if exc is not None else ""
+    for s in _ALREADY_DOWN_SUBSTRINGS:
+        if s in msg:
+            return True
+    return False
+
 def main():
     if not ACTION or not NODE or not SERVER:
         raise Exception("Usage: control_server.py --action start|stop --node Node01 --server AppSrv01 [--timeout N --delay N]")
@@ -47,12 +60,24 @@ def main():
     before = _state(NODE, SERVER)
 
     if ACTION == "stop":
-        if before == "STOPPED":
+        # Idempotency: STOPPED or NOT_FOUND both mean “already down enough”.
+        if before in ["STOPPED", "NOT_FOUND"]:
             print("CHANGED:false")
             print("STATE:%s" % before)
             return
-        AdminControl.stopServer(SERVER, NODE)
-        after = _wait_for(NODE, SERVER, ["STOPPED"])
+
+        try:
+            AdminControl.stopServer(SERVER, NODE)
+        except Exception as e:
+            # If stop fails because it's already not running, treat as success.
+            if _is_already_down_exception(e):
+                print("CHANGED:false")
+                print("STATE:%s" % before)
+                return
+            raise
+
+        # After stopping, state may become STOPPED or disappear (NOT_FOUND) depending on platform/config.
+        after = _wait_for(NODE, SERVER, ["STOPPED", "NOT_FOUND"])
         print("CHANGED:true")
         print("STATE:%s->%s" % (before, after))
         return
@@ -62,6 +87,7 @@ def main():
             print("CHANGED:false")
             print("STATE:%s" % before)
             return
+
         AdminControl.startServer(SERVER, NODE)
         after = _wait_for(NODE, SERVER, ["STARTED", "RUNNING"])
         print("CHANGED:true")
