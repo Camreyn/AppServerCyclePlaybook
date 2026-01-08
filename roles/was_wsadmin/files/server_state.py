@@ -15,21 +15,27 @@ def _server_mbean(node, server):
     query = "type=Server,node=%s,process=%s,*" % (node, server)
     return AdminControl.completeObjectName(query)
 
+def _state(node, server):
+    mbean = _server_mbean(node, server)
+    if not mbean:
+        return "NOT_FOUND"
+    try:
+        return AdminControl.getAttribute(mbean, "state")
+    except:
+        return "UNKNOWN"
+
 def main():
     if not NODE or not SERVER:
         raise Exception("Usage: server_state.py --node Node01 --server AppSrv01")
 
-    mbean = _server_mbean(NODE, SERVER)
-    if not mbean:
-        print("%s/%s=NOT_FOUND" % (NODE, SERVER))
-        return
+    st = _state(NODE, SERVER)
 
-    try:
-        st = AdminControl.getAttribute(mbean, "state")
-    except:
-        st = "UNKNOWN"
-
+    # Human-friendly + stable output for Ansible parsing/logging
     print("%s/%s=%s" % (NODE, SERVER, st))
+
+    # Optional: machine-friendly marker line (safe to ignore)
+    # This can be useful later if you decide to parse results more strictly.
+    print("STATE:%s" % st)
 
 try:
     main()
