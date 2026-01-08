@@ -32,9 +32,6 @@ def main():
 
     # Human-friendly + stable output for Ansible parsing/logging
     print("%s/%s=%s" % (NODE, SERVER, st))
-
-    # Optional: machine-friendly marker line (safe to ignore)
-    # This can be useful later if you decide to parse results more strictly.
     print("STATE:%s" % st)
 
 try:
