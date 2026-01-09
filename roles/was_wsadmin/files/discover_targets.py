@@ -23,11 +23,10 @@ def _escape_json_string(s):
     return s
 
 def _json_value(v):
-    # Keep this extremely conservative for old wsadmin/Jython environments
     if v is None:
         return "null"
 
-    # bool in Python 2 is a subclass of int; check it first
+    # bool is subclass of int in Python 2; check first
     try:
         if isinstance(v, bool):
             if v:
@@ -36,12 +35,10 @@ def _json_value(v):
     except:
         pass
 
-    # numbers
     try:
         if isinstance(v, (int, long)):
             return str(v)
     except:
-        # long may not exist in some constrained runtimes; ignore
         pass
 
     try:
@@ -50,7 +47,6 @@ def _json_value(v):
     except:
         pass
 
-    # default: string
     return "\"" + _escape_json_string(v) + "\""
 
 def _json_obj(d):
@@ -96,7 +92,6 @@ def main():
             except:
                 stype = ""
 
-            # Only application servers
             if stype != "APPLICATION_SERVER":
                 continue
 
