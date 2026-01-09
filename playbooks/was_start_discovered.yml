@@ -39,21 +39,36 @@
           was_node_name) are set via inventory or survey.
       become: false
 
-    - name: Copy wsadmin scripts to DMGR profile bin (as root)
+    - name: Stage wsadmin scripts on DMGR as deploy (no root)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
-        dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
-        mode: "0755"
+        dest: "/tmp/{{ item }}"
+        mode: "0644"
       loop:
         - discover_targets.py
         - server_state.py
         - control_server.py
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
-      become: true
-      become_user: root
-      become_method: su
-      become_flags: "-s /bin/bash"
+      become: false
+
+      - name: Promote wsadmin scripts into DMGR profile bin (su to root via expect)
+      ansible.builtin.expect:
+        command: >
+          /bin/su - root -c
+          "install -m 0755 /tmp/discover_targets.py {{ was_dmgr_profile }}/bin/discover_targets.py &&
+           install -m 0755 /tmp/server_state.py     {{ was_dmgr_profile }}/bin/server_state.py &&
+           install -m 0755 /tmp/control_server.py   {{ was_dmgr_profile }}/bin/control_server.py &&
+           chown {{ was_run_user | default('wsadmin') }}:{{ was_run_user | default('wsadmin') }}
+             {{ was_dmgr_profile }}/bin/discover_targets.py
+             {{ was_dmgr_profile }}/bin/server_state.py
+             {{ was_dmgr_profile }}/bin/control_server.py"
+        responses:
+          (?i)password: "{{ was_root_su_password }}"
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+      become: false
+      no_log: true
 
     - name: Ensure wsadmin owns staged scripts on DMGR
       ansible.builtin.file:
