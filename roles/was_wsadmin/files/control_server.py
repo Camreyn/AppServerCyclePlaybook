@@ -22,14 +22,10 @@ _ALREADY_DOWN_SUBSTRINGS = (
 )
 
 def _server_mbean(node, server):
-    # Application server process MBean
     query = "type=Server,node=%s,process=%s,*" % (node, server)
     return AdminControl.completeObjectName(query)
 
 def _state(node, server):
-    """
-    Returns one of: RUNNING/STARTED/STOPPED/NOT_FOUND/UNKNOWN
-    """
     mbean = _server_mbean(node, server)
     if not mbean:
         return "NOT_FOUND"
@@ -52,7 +48,6 @@ def _wait_for(node, server, desired_states):
         time.sleep(DELAY)
 
 def _is_already_down_exception(exc):
-    # Avoid ternary syntax for older Jython
     msg = ""
     if exc is not None:
         try:
@@ -77,7 +72,6 @@ def main():
     before = _state(NODE, SERVER)
 
     if ACTION == "stop":
-        # Idempotency: STOPPED or NOT_FOUND => already down enough
         if before == "STOPPED" or before == "NOT_FOUND":
             print("CHANGED:false")
             print("STATE:%s" % before)
@@ -86,21 +80,18 @@ def main():
         try:
             AdminControl.stopServer(SERVER, NODE)
         except Exception, e:
-            # If stop fails because it's already not running, treat as success
             if _is_already_down_exception(e):
                 print("CHANGED:false")
                 print("STATE:%s" % before)
                 return
             raise
 
-        # After stopping, state may become STOPPED or disappear (NOT_FOUND)
         after = _wait_for(NODE, SERVER, ("STOPPED", "NOT_FOUND"))
         print("CHANGED:true")
         print("STATE:%s->%s" % (before, after))
         return
 
     if ACTION == "start":
-        # Idempotency: already up
         if before == "STARTED" or before == "RUNNING":
             print("CHANGED:false")
             print("STATE:%s" % before)
