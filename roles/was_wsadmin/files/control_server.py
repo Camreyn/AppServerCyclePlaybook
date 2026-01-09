@@ -1,13 +1,4 @@
 # -*- coding: utf-8 -*-
-#
-# control_server.py
-#
-# wsadmin / Jython-safe control script for starting/stopping application servers.
-# Designed to be:
-# - Portable across WAS / Portal / BAW tiers
-# - Idempotent (stop on an already-down server is not an error)
-# - Free of nonessential stdlib dependencies (keeps compatibility high)
-#
 import sys
 import time
 
