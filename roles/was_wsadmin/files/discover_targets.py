@@ -5,22 +5,16 @@ def _args_after(flag):
     if flag not in sys.argv:
         return []
     idx = sys.argv.index(flag)
-    return sys.argv[idx + 1 :]
+    return sys.argv[idx + 1:]
 
 def _escape_json_string(s):
-    """
-    Minimal JSON string escaper for wsadmin/Jython environments where json module
-    may not exist. Produces valid JSON string content.
-    """
     if s is None:
         s = ""
-    # Ensure we're working with a plain string type
     try:
         s = str(s)
     except:
         s = ""
 
-    # Escape backslash, quotes, and control characters
     s = s.replace("\\", "\\\\")
     s = s.replace("\"", "\\\"")
     s = s.replace("\r", "\\r")
@@ -28,36 +22,56 @@ def _escape_json_string(s):
     s = s.replace("\t", "\\t")
     return s
 
+def _json_value(v):
+    # Keep this extremely conservative for old wsadmin/Jython environments
+    if v is None:
+        return "null"
+
+    # bool in Python 2 is a subclass of int; check it first
+    try:
+        if isinstance(v, bool):
+            if v:
+                return "true"
+            return "false"
+    except:
+        pass
+
+    # numbers
+    try:
+        if isinstance(v, (int, long)):
+            return str(v)
+    except:
+        # long may not exist in some constrained runtimes; ignore
+        pass
+
+    try:
+        if isinstance(v, float):
+            return str(v)
+    except:
+        pass
+
+    # default: string
+    return "\"" + _escape_json_string(v) + "\""
+
 def _json_obj(d):
-    """
-    Convert a flat dict of string keys -> primitive values into a JSON object string.
-    Values supported: None, bool, int/long, float, str.
-    """
     parts = []
-    # Stable ordering isn't required, but it helps with debugging.
     keys = list(d.keys())
     keys.sort()
-    for k in keys:
+    i = 0
+    while i < len(keys):
+        k = keys[i]
         v = d[k]
-        k_s = "\"" + _escape_json_string(k) + "\""
-
-        if v is None:
-            v_s = "null"
-        elif isinstance(v, bool):
-            v_s = "true" if v else "false"
-        elif isinstance(v, (int, long)):
-            v_s = str(v)
-        elif isinstance(v, float):
-            # Avoid scientific notation surprises; plain str is usually OK here.
-            v_s = str(v)
-        else:
-            v_s = "\"" + _escape_json_string(v) + "\""
-
-        parts.append(k_s + ":" + v_s)
+        parts.append("\"" + _escape_json_string(k) + "\":" + _json_value(v))
+        i += 1
     return "{" + ",".join(parts) + "}"
 
 def _json_array_of_objects(objs):
-    return "[" + ",".join([_json_obj(o) for o in objs]) + "]"
+    parts = []
+    i = 0
+    while i < len(objs):
+        parts.append(_json_obj(objs[i]))
+        i += 1
+    return "[" + ",".join(parts) + "]"
 
 def main():
     nodes = _args_after("--nodes")
@@ -69,11 +83,7 @@ def main():
     for node in nodes:
         node_id = AdminConfig.getid("/Node:%s/" % node)
         if not node_id:
-            # Node not found - still report it so caller can decide
-            results.append({
-                "node": node,
-                "error": "NODE_NOT_FOUND"
-            })
+            results.append({"node": node, "error": "NODE_NOT_FOUND"})
             continue
 
         servers = AdminConfig.list("Server", node_id)
@@ -86,7 +96,7 @@ def main():
             except:
                 stype = ""
 
-            # Only application servers. This excludes NODE_AGENT and DEPLOYMENT_MANAGER.
+            # Only application servers
             if stype != "APPLICATION_SERVER":
                 continue
 
@@ -101,12 +111,9 @@ def main():
                 "serverType": stype
             })
 
-    # Emit JSON only (no dependency on json module)
-    # Expected by Ansible: {"targets": [ ... ]}
     out = "{"
     out += "\"targets\":" + _json_array_of_objects(results)
     out += "}"
-
     sys.stdout.write(out)
     sys.stdout.flush()
 
