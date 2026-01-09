@@ -52,7 +52,7 @@
       run_once: true
       become: false
 
-      - name: Promote wsadmin scripts into DMGR profile bin (su to root via expect)
+    - name: Promote wsadmin scripts into DMGR profile bin (su to root via expect)
       ansible.builtin.expect:
         command: >
           /bin/su - root -c
