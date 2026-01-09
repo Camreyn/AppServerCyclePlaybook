@@ -16,10 +16,6 @@ def _server_mbean(node, server):
     return AdminControl.completeObjectName(query)
 
 def _state(node, server):
-    """
-    Returns one of: RUNNING/STARTED/STOPPED/NOT_FOUND/UNKNOWN.
-    NOT_FOUND is common if the server process is not currently discoverable via AdminControl.
-    """
     mbean = _server_mbean(node, server)
     if not mbean:
         return "NOT_FOUND"
@@ -33,11 +29,7 @@ def main():
         raise Exception("Usage: server_state.py --node Node01 --server AppSrv01")
 
     st = _state(NODE, SERVER)
-
-    # Primary line: stable + easy to grep / parse
     print("%s/%s=%s" % (NODE, SERVER, st))
-
-    # Secondary line: marker style (optional, safe to ignore)
     print("STATE:%s" % st)
 
 try:
