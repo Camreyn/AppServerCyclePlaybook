@@ -3,6 +3,9 @@
   hosts: was_all_nodes
   gather_facts: false
   serial: 1
+  become: true
+  become_user: "{{ was_run_user | default('wsadmin') }}"
+  become_method: su
 
   tasks:
     - name: Safety check – require explicit approval for disruptive actions
@@ -13,6 +16,7 @@
           Disruptive actions are disabled.
           Set was_allow_disruptive=true (survey/extra vars) to proceed.
       run_once: true
+      become: false
 
     - name: Validate required vars (DMGR + node)
       ansible.builtin.assert:
@@ -29,8 +33,9 @@
           Missing required variables. Ensure DMGR vars (was_dmgr_host, was_dmgr_profile,
           was_wsadmin_user, was_wsadmin_pass) and per-host node vars (was_node_profile_path,
           was_node_name) are set via inventory or survey.
+      become: false
 
-    - name: Stage wsadmin scripts to DMGR (safe)
+    - name: Stage wsadmin scripts to DMGR (run as wsadmin)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
         dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
@@ -55,14 +60,15 @@
       changed_when: dmgr_start.rc == 0
       failed_when: dmgr_start.rc != 0 and ("ADMU" not in (dmgr_start.stdout | default('')))
 
-    - name: Wait for DMGR SOAP port to be reachable (default 8879)
+    - name: Wait for DMGR SOAP port to be reachable (local check on DMGR host)
       ansible.builtin.wait_for:
-        host: "{{ was_dmgr_host }}"
+        host: "127.0.0.1"
         port: "{{ was_dmgr_soap_port | default(8879) }}"
         timeout: "{{ was_dmgr_soap_wait_timeout_sec | default(300) }}"
         state: started
-      delegate_to: localhost
+      delegate_to: "{{ was_dmgr_host }}"
       run_once: true
+      become: false
 
     - name: Start nodeagent on each limited host (optional)
       when: was_start_nodeagent | default(true) | bool
@@ -85,6 +91,7 @@
             | unique
           }}
       run_once: true
+      become: false
 
     - name: Discover application servers via DMGR (safe)
       ansible.builtin.shell: >
@@ -108,6 +115,7 @@
       ansible.builtin.set_fact:
         was_discovery_json_candidates: "{{ (discovery_out.stdout | string) | regex_findall('(?s)\\{.*?\\}(?=\\s*$)') }}"
       run_once: true
+      become: false
 
     - name: Assert JSON payload was found in wsadmin output
       ansible.builtin.assert:
@@ -118,16 +126,19 @@
           First 800 chars:
           {{ (discovery_out.stdout | string)[:800] }}
       run_once: true
+      become: false
 
     - name: Parse discovery JSON payload (last candidate)
       ansible.builtin.set_fact:
         was_discovery_json: "{{ (was_discovery_json_candidates | last | string) | from_json }}"
       run_once: true
+      become: false
 
     - name: Build discovered target list
       ansible.builtin.set_fact:
         was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
       run_once: true
+      become: false
 
     - name: Filter discovered targets to nodes in scope
       ansible.builtin.set_fact:
@@ -140,6 +151,7 @@
             | sort(attribute='node')
           }}
       run_once: true
+      become: false
 
     - name: Start discovered application servers (one at a time)
       ansible.builtin.shell: >
@@ -163,8 +175,7 @@
       loop_control:
         label: "{{ item.node }}/{{ item.server }}"
       run_once: true
-      changed_when: >
-        (start_out.stdout | default('')) is search('CHANGED:true')
+      changed_when: (start_out.stdout | default('')) is search('CHANGED:true')
       failed_when: start_out.rc != 0
 
     - name: Verify discovered servers are RUNNING/STARTED (optional)
