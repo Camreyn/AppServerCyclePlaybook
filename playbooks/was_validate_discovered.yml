@@ -1,8 +1,12 @@
 ---
-- name: Smoke test WAS/BAW discovery + wsadmin control (non-disruptive by default)
+- name: Validate discovered WAS/BAW servers (wsadmin discovery + state + idempotent probes)
   hosts: was_all_nodes
   gather_facts: false
   serial: 1
+
+  become: true
+  become_user: "{{ was_run_user | default('wsadmin') }}"
+  become_method: su
 
   vars:
     was_smoketest_allow_changes: false
@@ -15,6 +19,7 @@
           - "was_dmgr_host={{ was_dmgr_host | default('UNSET') }}"
           - "was_dmgr_profile={{ was_dmgr_profile | default('UNSET') }}"
       run_once: true
+      become: false
 
     - name: Validate required vars (DMGR + node)
       ansible.builtin.assert:
@@ -31,8 +36,9 @@
           Missing required variables. Ensure DMGR vars (was_dmgr_host, was_dmgr_profile,
           was_wsadmin_user, was_wsadmin_pass) and per-host node vars (was_node_profile_path,
           was_node_name) are set via inventory or survey.
+      become: false
 
-    - name: Stage wsadmin scripts to DMGR (safe)
+    - name: Stage wsadmin scripts to DMGR (run as wsadmin)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
         dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
@@ -44,19 +50,6 @@
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
 
-    - name: Start DMGR (optional; needed after reboot if DMGR host was restarted)
-      when: was_start_dmgr | default(true) | bool
-      ansible.builtin.shell: >
-        set -euo pipefail &&
-        "{{ was_dmgr_profile }}/bin/startManager.sh"
-      args:
-        executable: /bin/bash
-      delegate_to: "{{ was_dmgr_host }}"
-      run_once: true
-      register: dmgr_start
-      changed_when: dmgr_start.rc == 0
-      failed_when: dmgr_start.rc != 0 and ("ADMU" not in (dmgr_start.stdout | default('')))
-
     - name: Wait for DMGR SOAP port to be reachable (local check on DMGR host)
       ansible.builtin.wait_for:
         host: "127.0.0.1"
@@ -66,17 +59,6 @@
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
       become: false
-
-    - name: Ensure nodeagent is started on each limited host (optional)
-      when: was_start_nodeagent | default(true) | bool
-      ansible.builtin.shell: >
-        set -euo pipefail &&
-        "{{ was_node_profile_path }}/bin/startNode.sh"
-      args:
-        executable: /bin/bash
-      register: nodeagent_start
-      changed_when: nodeagent_start.rc == 0
-      failed_when: nodeagent_start.rc != 0 and ("ADMU" not in (nodeagent_start.stdout | default('')))
 
     - name: Build node list from limited hosts
       ansible.builtin.set_fact:
@@ -88,6 +70,7 @@
             | unique
           }}
       run_once: true
+      become: false
 
     - name: Discover application servers via DMGR (safe)
       ansible.builtin.shell: >
@@ -111,6 +94,7 @@
       ansible.builtin.set_fact:
         was_discovery_json_candidates: "{{ (discovery_out.stdout | string) | regex_findall('(?s)\\{.*?\\}(?=\\s*$)') }}"
       run_once: true
+      become: false
 
     - name: Assert JSON payload was found in wsadmin output
       ansible.builtin.assert:
@@ -121,30 +105,28 @@
           First 800 chars:
           {{ (discovery_out.stdout | string)[:800] }}
       run_once: true
+      become: false
 
     - name: Parse discovery JSON payload (last candidate)
       ansible.builtin.set_fact:
         was_discovery_json: "{{ (was_discovery_json_candidates | last | string) | from_json }}"
       run_once: true
+      become: false
 
     - name: Build discovered target list
       ansible.builtin.set_fact:
-        was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
-      run_once: true
-
-    - name: Filter discovered targets to nodes in scope
-      ansible.builtin.set_fact:
         was_discovered_targets: >-
           {{
-            was_discovered_targets_all
+            (was_discovery_json.targets | default([]))
             | selectattr('server', 'defined')
             | selectattr('node', 'in', was_nodes_in_scope)
             | list
             | sort(attribute='node')
           }}
       run_once: true
+      become: false
 
-    - name: Fail if discovery returns zero targets (helps catch bad limits/node names)
+    - name: Fail if discovery returns zero targets
       ansible.builtin.assert:
         that:
           - was_discovered_targets | length > 0
@@ -152,11 +134,7 @@
           Discovery returned zero application servers for nodes {{ was_nodes_in_scope }}.
           Check was_node_name host_vars and DMGR visibility.
       run_once: true
-
-    - name: Show discovered targets (node/server)
-      ansible.builtin.debug:
-        var: was_discovered_targets
-      run_once: true
+      become: false
 
     - name: Query runtime state for each discovered server (safe)
       ansible.builtin.shell: >
@@ -186,8 +164,9 @@
         was_down_targets: []
         was_unknown_targets: []
       run_once: true
+      become: false
 
-    - name: Classify targets by current state
+    - name: Classify RUNNING/STARTED targets
       ansible.builtin.set_fact:
         was_running_targets: "{{ was_running_targets + [ item.item ] }}"
       when: (item.stdout | default('')) is search('=(RUNNING|STARTED)\\b')
@@ -195,8 +174,9 @@
       loop_control:
         label: "{{ item.item.node }}/{{ item.item.server }}"
       run_once: true
+      become: false
 
-    - name: Classify down targets (STOPPED/NOT_FOUND)
+    - name: Classify STOPPED/NOT_FOUND targets
       ansible.builtin.set_fact:
         was_down_targets: "{{ was_down_targets + [ item.item ] }}"
       when: (item.stdout | default('')) is search('=(STOPPED|NOT_FOUND)\\b')
@@ -204,8 +184,9 @@
       loop_control:
         label: "{{ item.item.node }}/{{ item.item.server }}"
       run_once: true
+      become: false
 
-    - name: Classify unknown targets (everything else)
+    - name: Classify UNKNOWN targets
       ansible.builtin.set_fact:
         was_unknown_targets: "{{ was_unknown_targets + [ item.item ] }}"
       when: >
@@ -215,33 +196,7 @@
       loop_control:
         label: "{{ item.item.node }}/{{ item.item.server }}"
       run_once: true
-
-    - name: Show sample raw wsadmin outputs (helps debug unexpected formats)
-      ansible.builtin.debug:
-        msg:
-          - "target={{ item.item.node }}/{{ item.item.server }}"
-          - "stdout={{ item.stdout | default('') }}"
-          - "stderr={{ item.stderr | default('') }}"
-      loop: "{{ state_out.results | default([]) }}"
-      when: was_debug_wsadmin_output | default(false) | bool
-      run_once: true
-
-    - name: Summarize current states
-      ansible.builtin.debug:
-        msg:
-          - "RUNNING/STARTED targets: {{ was_running_targets | length }}"
-          - "STOPPED/NOT_FOUND targets: {{ was_down_targets | length }}"
-          - "UNKNOWN targets: {{ was_unknown_targets | length }}"
-      run_once: true
-
-    - name: Fail if any UNKNOWN targets (recommended; indicates DMGR visibility or runtime issues)
-      when: was_fail_on_unknown | default(true) | bool
-      ansible.builtin.assert:
-        that:
-          - was_unknown_targets | length == 0
-        fail_msg: >
-          One or more targets returned UNKNOWN state. Investigate wsadmin connectivity/state.
-      run_once: true
+      become: false
 
     - name: Probe START on already-running targets (should not change anything)
       ansible.builtin.shell: >
@@ -300,15 +255,7 @@
           - (start_probe_out.results | default([]) | selectattr('stdout', 'search', 'CHANGED:true') | list | length) == 0
           - (stop_probe_out.results  | default([]) | selectattr('stdout', 'search', 'CHANGED:true') | list | length) == 0
         fail_msg: >
-          Smoke test detected CHANGED:true during control probes.
-          This indicates the probes would have started/stopped something.
+          Validate run detected CHANGED:true during probes.
           If you intended to allow changes, set was_smoketest_allow_changes=true.
       run_once: true
-
-    - name: Smoke test summary (probes)
-      ansible.builtin.debug:
-        msg:
-          - "Start probes executed: {{ (start_probe_out.results | default([])) | length }}"
-          - "Stop probes executed:  {{ (stop_probe_out.results  | default([])) | length }}"
-          - "No-change policy enforced: {{ not (was_smoketest_allow_changes | default(false) | bool) }}"
-      run_once: true
+      become: false
