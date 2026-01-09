@@ -57,14 +57,15 @@
       changed_when: dmgr_start.rc == 0
       failed_when: dmgr_start.rc != 0 and ("ADMU" not in (dmgr_start.stdout | default('')))
 
-    - name: Wait for DMGR SOAP port to be reachable (default 8879)
+    - name: Wait for DMGR SOAP port to be reachable (local check on DMGR host)
       ansible.builtin.wait_for:
-        host: "{{ was_dmgr_host }}"
+        host: "127.0.0.1"
         port: "{{ was_dmgr_soap_port | default(8879) }}"
         timeout: "{{ was_dmgr_soap_wait_timeout_sec | default(300) }}"
         state: started
-      delegate_to: localhost
+      delegate_to: "{{ was_dmgr_host }}"
       run_once: true
+      become: false
 
     - name: Ensure nodeagent is started on each limited host (optional)
       when: was_start_nodeagent | default(true) | bool
