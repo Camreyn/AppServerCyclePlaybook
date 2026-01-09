@@ -50,6 +50,10 @@
         - control_server.py
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
+      become: true
+      become_user: root
+      become_method: su
+      become_flags: "-s /bin/bash"
 
     - name: Ensure wsadmin owns staged scripts on DMGR
       ansible.builtin.file:
