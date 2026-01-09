@@ -15,7 +15,6 @@ SERVER  = _arg("--server")
 TIMEOUT = int(_arg("--timeout", "600"))
 DELAY   = int(_arg("--delay", "5"))
 
-# Common wsadmin/Jython error messages that effectively mean "already stopped"
 _ALREADY_DOWN_SUBSTRINGS = (
     "Unable to locate running server",
     "is not running",
@@ -23,14 +22,13 @@ _ALREADY_DOWN_SUBSTRINGS = (
 )
 
 def _server_mbean(node, server):
-    # For application servers
+    # Application server process MBean
     query = "type=Server,node=%s,process=%s,*" % (node, server)
     return AdminControl.completeObjectName(query)
 
 def _state(node, server):
     """
-    Returns one of: RUNNING/STARTED/STOPPED/NOT_FOUND/UNKNOWN.
-    NOT_FOUND is common when a server process is not present / not registered as running.
+    Returns one of: RUNNING/STARTED/STOPPED/NOT_FOUND/UNKNOWN
     """
     mbean = _server_mbean(node, server)
     if not mbean:
@@ -54,11 +52,20 @@ def _wait_for(node, server, desired_states):
         time.sleep(DELAY)
 
 def _is_already_down_exception(exc):
-    msg = str(exc) if exc is not None else ""
+    # Avoid ternary syntax for older Jython
+    msg = ""
+    if exc is not None:
+        try:
+            msg = str(exc)
+        except:
+            msg = ""
+    else:
+        msg = ""
+
     for s in _ALREADY_DOWN_SUBSTRINGS:
         if s in msg:
-            return True
-    return False
+            return 1
+    return 0
 
 def main():
     if not ACTION or not NODE or not SERVER:
@@ -70,31 +77,31 @@ def main():
     before = _state(NODE, SERVER)
 
     if ACTION == "stop":
-        # Idempotency: STOPPED or NOT_FOUND both mean “already down enough”.
-        if before in ("STOPPED", "NOT_FOUND"):
+        # Idempotency: STOPPED or NOT_FOUND => already down enough
+        if before == "STOPPED" or before == "NOT_FOUND":
             print("CHANGED:false")
             print("STATE:%s" % before)
             return
 
         try:
             AdminControl.stopServer(SERVER, NODE)
-        except Exception as e:
-            # If stop fails because it's already not running, treat as success (idempotent).
+        except Exception, e:
+            # If stop fails because it's already not running, treat as success
             if _is_already_down_exception(e):
                 print("CHANGED:false")
                 print("STATE:%s" % before)
                 return
             raise
 
-        # After stopping, state may become STOPPED or disappear (NOT_FOUND) depending on platform/config.
+        # After stopping, state may become STOPPED or disappear (NOT_FOUND)
         after = _wait_for(NODE, SERVER, ("STOPPED", "NOT_FOUND"))
         print("CHANGED:true")
         print("STATE:%s->%s" % (before, after))
         return
 
     if ACTION == "start":
-        # Idempotency: treat both RUNNING and STARTED as already up.
-        if before in ("STARTED", "RUNNING"):
+        # Idempotency: already up
+        if before == "STARTED" or before == "RUNNING":
             print("CHANGED:false")
             print("STATE:%s" % before)
             return
