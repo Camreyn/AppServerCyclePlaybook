@@ -180,25 +180,6 @@
       changed_when: false
       failed_when: state_out.rc != 0
 
-    - name: Build target sets based on observed state
-      ansible.builtin.set_fact:
-        was_targets_with_state: >-
-          {{
-            state_out.results
-            | map(
-                'combine',
-                {
-                  'state': (
-                    (item.stdout | default('')) | regex_search('=([A-Z_]+)', '\\1')
-                  )
-                }
-              )
-            | list
-          }}
-      run_once: true
-      vars:
-        item: {}
-
     - name: Initialize state lists
       ansible.builtin.set_fact:
         was_running_targets: []
@@ -233,6 +214,16 @@
       loop: "{{ state_out.results }}"
       loop_control:
         label: "{{ item.item.node }}/{{ item.item.server }}"
+      run_once: true
+
+    - name: Show sample raw wsadmin outputs (helps debug unexpected formats)
+      ansible.builtin.debug:
+        msg:
+          - "target={{ item.item.node }}/{{ item.item.server }}"
+          - "stdout={{ item.stdout | default('') }}"
+          - "stderr={{ item.stderr | default('') }}"
+      loop: "{{ state_out.results | default([]) }}"
+      when: was_debug_wsadmin_output | default(false) | bool
       run_once: true
 
     - name: Summarize current states
