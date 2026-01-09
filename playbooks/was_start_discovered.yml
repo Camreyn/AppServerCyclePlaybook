@@ -4,8 +4,12 @@
   gather_facts: false
   serial: 1
   become: true
-  become_user: "{{ was_run_user | default('wsadmin') }}"
+  become_user: root
   become_method: su
+
+  vars:
+    was_run_user: "{{ was_run_user | default('wsadmin') }}"
+    was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
 
   tasks:
     - name: Safety check – require explicit approval for disruptive actions
@@ -35,7 +39,7 @@
           was_node_name) are set via inventory or survey.
       become: false
 
-    - name: Stage wsadmin scripts to DMGR (run as wsadmin)
+    - name: Copy wsadmin scripts to DMGR profile bin (as root)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
         dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
@@ -47,11 +51,24 @@
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
 
-    - name: Start DMGR (optional; needed after reboot if DMGR host was restarted)
+    - name: Ensure wsadmin owns staged scripts on DMGR
+      ansible.builtin.file:
+        path: "{{ was_dmgr_profile }}/bin/{{ item }}"
+        owner: "{{ was_run_user }}"
+        group: "{{ was_run_user }}"
+        mode: "0755"
+      loop:
+        - discover_targets.py
+        - server_state.py
+        - control_server.py
+      delegate_to: "{{ was_dmgr_host }}"
+      run_once: true
+
+    - name: Start DMGR (optional; run as wsadmin)
       when: was_start_dmgr | default(true) | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        "{{ was_dmgr_profile }}/bin/startManager.sh"
+        {{ was_su_wsadmin_prefix | quote }} "{{ was_dmgr_profile }}/bin/startManager.sh"
       args:
         executable: /bin/bash
       delegate_to: "{{ was_dmgr_host }}"
@@ -70,11 +87,11 @@
       run_once: true
       become: false
 
-    - name: Start nodeagent on each limited host (optional)
+    - name: Start nodeagent on each limited host (optional; run as wsadmin)
       when: was_start_nodeagent | default(true) | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        "{{ was_node_profile_path }}/bin/startNode.sh"
+        {{ was_su_wsadmin_prefix | quote }} "{{ was_node_profile_path }}/bin/startNode.sh"
       args:
         executable: /bin/bash
       register: nodeagent_start
@@ -93,16 +110,10 @@
       run_once: true
       become: false
 
-    - name: Discover application servers via DMGR (safe)
+    - name: Discover application servers via DMGR (run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        cd "{{ was_dmgr_profile }}/bin" &&
-        ./wsadmin.sh -quiet
-        -lang jython
-        -user "{{ was_wsadmin_user }}"
-        -password "{{ was_wsadmin_pass }}"
-        -f "./discover_targets.py"
-        --nodes {{ was_nodes_in_scope | join(' ') }}
+        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' && ./wsadmin.sh -quiet -lang jython -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}' -f './discover_targets.py' --nodes {{ was_nodes_in_scope | join(' ') }}"
       args:
         executable: /bin/bash
       register: discovery_out
@@ -153,20 +164,10 @@
       run_once: true
       become: false
 
-    - name: Start discovered application servers (one at a time)
+    - name: Start discovered application servers (one at a time; run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        cd "{{ was_dmgr_profile }}/bin" &&
-        ./wsadmin.sh -quiet
-        -lang jython
-        -user "{{ was_wsadmin_user }}"
-        -password "{{ was_wsadmin_pass }}"
-        -f "./control_server.py"
-        --action start
-        --node "{{ item.node }}"
-        --server "{{ item.server }}"
-        --timeout "{{ was_poll_timeout_sec | default(600) }}"
-        --delay "{{ was_poll_delay_sec | default(5) }}"
+        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' && ./wsadmin.sh -quiet -lang jython -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}' -f './control_server.py' --action start --node '{{ item.node }}' --server '{{ item.server }}' --timeout '{{ was_poll_timeout_sec | default(600) }}' --delay '{{ was_poll_delay_sec | default(5) }}'"
       args:
         executable: /bin/bash
       register: start_out
@@ -178,18 +179,11 @@
       changed_when: (start_out.stdout | default('')) is search('CHANGED:true')
       failed_when: start_out.rc != 0
 
-    - name: Verify discovered servers are RUNNING/STARTED (optional)
+    - name: Verify discovered servers are RUNNING/STARTED (optional; run as wsadmin)
       when: was_verify_after_start | default(true) | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        cd "{{ was_dmgr_profile }}/bin" &&
-        ./wsadmin.sh -quiet
-        -lang jython
-        -user "{{ was_wsadmin_user }}"
-        -password "{{ was_wsadmin_pass }}"
-        -f "./server_state.py"
-        --node "{{ item.node }}"
-        --server "{{ item.server }}"
+        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' && ./wsadmin.sh -quiet -lang jython -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}' -f './server_state.py' --node '{{ item.node }}' --server '{{ item.server }}'"
       args:
         executable: /bin/bash
       register: verify_out
