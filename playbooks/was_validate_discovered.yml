@@ -198,6 +198,7 @@
             set -euo pipefail &&
             {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
             ./wsadmin.sh -quiet -lang jython
+            -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
             -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
             -c 'print \"CONNECTED_OK\"' " || true
           args:
@@ -259,6 +260,7 @@
         set -euo pipefail &&
         {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
+        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/discover_targets.py'
         --nodes {{ was_nodes_in_scope | join(' ') }}"
@@ -396,6 +398,7 @@
         set -euo pipefail &&
         {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
+        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/server_state.py'
         --node '{{ item.node }}'
@@ -456,6 +459,7 @@
         set -euo pipefail &&
         {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
+        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/control_server.py'
         --action start --node '{{ item.node }}' --server '{{ item.server }}'
