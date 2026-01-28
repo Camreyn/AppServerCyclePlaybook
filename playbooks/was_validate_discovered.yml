@@ -258,9 +258,9 @@
       when: not was_skip_discovery_and_probes
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
-        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
+        -conntype SOAP -host {{ was_dmgr_host }} -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/discover_targets.py'
         --nodes {{ was_nodes_in_scope | join(' ') }}"
