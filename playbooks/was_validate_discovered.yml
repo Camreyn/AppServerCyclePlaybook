@@ -6,14 +6,14 @@
 
   vars:
     # OS user that should run wsadmin.sh
-    was_run_user: "{{ was_run_user | default('wsadmin') }}"
+    was_run_user: "{{ wsadmin }}"
 
     # Where we stage Jython scripts on the DMGR host (no root required)
-    was_wsadmin_stage_dir: "{{ was_wsadmin_stage_dir | default('/tmp/was_wsadmin_scripts') }}"
+    was_wsadmin_stage_dir: "{{ /tmp/was_wsadmin_scripts }}"
 
     # How long to wait for DMGR SOAP (if enabled)
-    was_dmgr_soap_port: "{{ was_dmgr_soap_port | default(8879) }}"
-    was_dmgr_soap_wait_timeout_sec: "{{ was_dmgr_soap_wait_timeout_sec | default(120) }}"
+    was_dmgr_soap_port: "{{ 8879 }}"
+    was_dmgr_soap_wait_timeout_sec: "{{ 120 }}"
 
     # If DMGR SOAP isn't reachable, collect diagnostics and fail fast (skip discovery/probes)
     was_fail_fast_on_dmgr_unreachable: true
