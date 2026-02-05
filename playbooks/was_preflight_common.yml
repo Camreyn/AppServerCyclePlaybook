@@ -122,14 +122,14 @@
     - name: Run su to wsadmin with id/whoami
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "id && whoami"
+        {{ was_su_wsadmin_prefix }} "id && whoami"
       args:
         executable: /bin/bash
       register: su_wsadmin_test
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
       changed_when: false
-      become: false
+      become: true
 
     - name: Mark su-to-wsadmin OK
       ansible.builtin.set_fact:
@@ -284,7 +284,7 @@
 - name: Discover application servers via DMGR (run as wsadmin)
   ansible.builtin.shell: >
     set -euo pipefail &&
-    {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+    {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
     ./wsadmin.sh -quiet -lang jython
     -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port | default(8879) }}'
     -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
@@ -297,7 +297,7 @@
   run_once: true
   changed_when: false
   failed_when: false
-  become: false
+  become: true
 
 - name: Discovery diag - show stdout/stderr if wsadmin failed
   when: discovery_out.rc != 0
