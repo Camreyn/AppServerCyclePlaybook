@@ -163,7 +163,6 @@
           args:
             executable: /bin/bash
           register: su_wsadmin_test
-          delegate_to: "{{ was_dmgr_host }}"
           run_once: true
           changed_when: false
           become: true
