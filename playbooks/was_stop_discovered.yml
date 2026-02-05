@@ -32,17 +32,13 @@
   gather_facts: false
   serial: 1
 
-  # Privilege escalation: deploy → root (via su), then tasks use su - wsadmin -c
-  become: true
-  become_user: root
-  become_method: su
-
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
 
-    # Wrapper: run a command as wsadmin (no Ansible become required)
-    was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
+    # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
+    # This matches the command-line pattern: sudo su - wsadmin -c "command"
+    was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
 
     # Where we stage Jython scripts on the DMGR host (no root required)
     was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
@@ -92,7 +88,7 @@
       run_once: true
       changed_when: (stop_out.stdout | default('')) is search('CHANGED:true')
       failed_when: stop_out.rc != 0
-      become: true
+      become: false
 
     - name: Show stop results
       ansible.builtin.debug:
@@ -119,7 +115,7 @@
         ("ADMU0116I" not in (nodeagent_stop.stdout | default(''))) and
         ("already stopped" not in (nodeagent_stop.stdout | default('') | lower)) and
         ("not running" not in (nodeagent_stop.stdout | default('') | lower))
-      become: true
+      become: false
 
     - name: Show nodeagent stop result
       when: was_stop_nodeagent | bool
