@@ -34,6 +34,11 @@
   gather_facts: false
   serial: 1
 
+  # Privilege escalation: deploy → root (via su), then tasks use su - wsadmin -c
+  become: true
+  become_user: root
+  become_method: su
+
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
@@ -47,6 +52,7 @@
     # DMGR SOAP configuration
     was_dmgr_soap_port: "8879"
     was_dmgr_soap_wait_timeout_sec: "120"
+
     # Behavior flags
     was_fail_fast_on_dmgr_unreachable: "true"
     was_skip_on_su_wsadmin_failure: "true"
@@ -160,7 +166,7 @@
           delegate_to: "{{ was_dmgr_host }}"
           run_once: true
           changed_when: false
-          become: false
+          become: true
 
         - name: Mark su-to-wsadmin OK
           ansible.builtin.set_fact:
@@ -377,7 +383,7 @@
       run_once: true
       changed_when: false
       failed_when: false
-      become: false
+      become: true
 
     - name: Discovery diag - show stdout/stderr if wsadmin failed
       when: not was_skip_discovery_and_probes and discovery_out.rc != 0
@@ -512,7 +518,7 @@
       run_once: true
       changed_when: false
       failed_when: false
-      become: false
+      become: true
 
     - name: Summarize server states
       when: not was_skip_discovery_and_probes
