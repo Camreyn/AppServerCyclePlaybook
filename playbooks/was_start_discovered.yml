@@ -37,9 +37,14 @@
   gather_facts: false
   serial: 1
 
+  # Privilege escalation: deploy → root (via su), then tasks use su - wsadmin -c
+  become: true
+  become_user: root
+  become_method: su
+
   vars:
     # OS user that should run wsadmin.sh
-    was_run_user: "{{ was_run_user | default('wsadmin') }}"
+    was_run_user: "wsadmin"
 
     # Wrapper: run a command as wsadmin (no Ansible become required)
     was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
@@ -48,17 +53,17 @@
     was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
 
     # DMGR SOAP configuration
-    was_dmgr_soap_port: "{{ was_dmgr_soap_port | default(8879) }}"
-    was_dmgr_soap_wait_timeout_sec: "{{ was_dmgr_soap_wait_timeout_sec | default(300) }}"
+    was_dmgr_soap_port: "8879"
+    was_dmgr_soap_wait_timeout_sec: "300"
 
     # Server control timeouts
-    was_poll_timeout_sec: "{{ was_poll_timeout_sec | default(600) }}"
-    was_poll_delay_sec: "{{ was_poll_delay_sec | default(5) }}"
+    was_poll_timeout_sec: "600"
+    was_poll_delay_sec: "5"
 
     # Optional behavior toggles
-    was_start_dmgr: "{{ was_start_dmgr | default(true) }}"
-    was_start_nodeagent: "{{ was_start_nodeagent | default(true) }}"
-    was_verify_after_start: "{{ was_verify_after_start | default(true) }}"
+    was_start_dmgr: "true"
+    was_start_nodeagent: "true"
+    was_verify_after_start: "true"
 
   tasks:
     # ==========================================================================
@@ -146,14 +151,14 @@
         - name: Run su to wsadmin with id/whoami
           ansible.builtin.shell: >
             set -euo pipefail &&
-            {{ was_su_wsadmin_prefix | quote }} "id && whoami"
+            {{ was_su_wsadmin_prefix }} "id && whoami"
           args:
             executable: /bin/bash
           register: su_wsadmin_test
           delegate_to: "{{ was_dmgr_host }}"
           run_once: true
           changed_when: false
-          become: false
+          become: true
 
       rescue:
         - name: Collect diagnostic - deploy identity
@@ -198,7 +203,7 @@
       when: was_start_dmgr | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "{{ was_dmgr_profile }}/bin/startManager.sh"
+        {{ was_su_wsadmin_prefix }} "{{ was_dmgr_profile }}/bin/startManager.sh"
       args:
         executable: /bin/bash
       delegate_to: "{{ was_dmgr_host }}"
@@ -210,7 +215,7 @@
         ("ADMU0116I" not in (dmgr_start.stdout | default(''))) and
         ("already running" not in (dmgr_start.stdout | default('') | lower)) and
         ("already started" not in (dmgr_start.stdout | default('') | lower))
-      become: false
+      become: true
 
     - name: Show DMGR start result
       when: was_start_dmgr | bool
@@ -239,7 +244,7 @@
       when: was_start_nodeagent | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "{{ was_node_profile_path }}/bin/startNode.sh"
+        {{ was_su_wsadmin_prefix }} "{{ was_node_profile_path }}/bin/startNode.sh"
       args:
         executable: /bin/bash
       register: nodeagent_start
@@ -249,7 +254,7 @@
         ("ADMU0116I" not in (nodeagent_start.stdout | default(''))) and
         ("already running" not in (nodeagent_start.stdout | default('') | lower)) and
         ("already started" not in (nodeagent_start.stdout | default('') | lower))
-      become: false
+      become: true
 
     - name: Show nodeagent start result
       when: was_start_nodeagent | bool
@@ -275,7 +280,7 @@
     - name: Discover application servers via DMGR (run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
         -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
@@ -288,7 +293,7 @@
       run_once: true
       changed_when: false
       failed_when: discovery_out.rc != 0
-      become: false
+      become: true
 
     # ==========================================================================
     # Parse discovery JSON output
@@ -359,7 +364,7 @@
     - name: Start discovered application servers (one at a time; run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
         -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
@@ -379,7 +384,7 @@
       run_once: true
       changed_when: (start_out.stdout | default('')) is search('CHANGED:true')
       failed_when: start_out.rc != 0
-      become: false
+      become: true
 
     - name: Show start results
       ansible.builtin.debug:
@@ -394,7 +399,7 @@
       when: was_verify_after_start | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
         -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
@@ -416,7 +421,7 @@
           (verify_out.stdout | default('')) is not search('=RUNNING') and
           (verify_out.stdout | default('')) is not search('=STARTED')
         )
-      become: false
+      become: true
 
     - name: Show verification results
       when: was_verify_after_start | bool
