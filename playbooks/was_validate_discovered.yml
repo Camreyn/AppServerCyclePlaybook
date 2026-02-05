@@ -1,39 +1,61 @@
 ---
-- name: Validate discovered WAS/BAW servers (branching diagnostics + fast skip)
+# =============================================================================
+# was_validate_discovered.yml
+# Validate WAS/BAW environment readiness (non-disruptive pre-flight check)
+#
+# This playbook validates:
+#   1. Required variables are defined
+#   2. wsadmin.sh exists on DMGR
+#   3. deploy user can su to wsadmin user (critical for BAW environments)
+#   4. DMGR SOAP port is reachable
+#   5. Application servers can be discovered
+#   6. Server states can be queried
+#
+# This playbook does NOT start, stop, or modify anything.
+# It's safe to run at any time to verify environment readiness.
+#
+# Required variables:
+#   - was_dmgr_host: DMGR hostname (delegate target)
+#   - was_dmgr_profile: Path to DMGR profile
+#   - was_wsadmin_user: wsadmin SOAP authentication user
+#   - was_wsadmin_pass: wsadmin SOAP authentication password
+#   - was_node_name: Per-host WebSphere node name
+#
+# Optional variables:
+#   - was_run_user: OS user to run wsadmin as (default: wsadmin)
+#   - was_dmgr_soap_port: DMGR SOAP port (default: 8879)
+#   - was_dmgr_soap_wait_timeout_sec: Timeout waiting for SOAP port (default: 120)
+#   - was_fail_fast_on_dmgr_unreachable: Fail immediately if DMGR SOAP unreachable (default: true)
+#   - was_skip_on_su_wsadmin_failure: Skip discovery if su fails (default: true)
+# =============================================================================
+
+- name: Validate discovered WAS/BAW servers (non-disruptive pre-flight check)
   hosts: was_all_nodes
   gather_facts: false
   serial: 1
 
   vars:
     # OS user that should run wsadmin.sh
-    was_run_user: "wsadmin"
-
-    # Where we stage Jython scripts on the DMGR host (no root required)
-    was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
-
-    # How long to wait for DMGR SOAP (if enabled)
-    was_dmgr_soap_port: "8879"
-    was_dmgr_soap_wait_timeout_sec: "120"
-
-    # If DMGR SOAP isn't reachable, collect diagnostics and fail fast (skip discovery/probes)
-    was_fail_fast_on_dmgr_unreachable: true
-
-    # Skip discovery/probes if we already know DMGR isn't healthy
-    was_skip_on_dmgr_issue: true
+    was_run_user: "{{ was_run_user | default('wsadmin') }}"
 
     # Wrapper: run a command as wsadmin (no Ansible become required)
     was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
 
-    # If false, probes must not cause changes (idempotency check)
-    was_smoketest_allow_changes: false
+    # Where we stage Jython scripts on the DMGR host (no root required)
+    was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
 
-    # New: If deploy cannot su to wsadmin reliably, branch diagnostics and skip discovery/probes
-    was_skip_on_su_wsadmin_failure: true
+    # DMGR SOAP configuration
+    was_dmgr_soap_port: "{{ was_dmgr_soap_port | default(8879) }}"
+    was_dmgr_soap_wait_timeout_sec: "{{ was_dmgr_soap_wait_timeout_sec | default(120) }}"
+
+    # Behavior flags
+    was_fail_fast_on_dmgr_unreachable: "{{ was_fail_fast_on_dmgr_unreachable | default(true) }}"
+    was_skip_on_su_wsadmin_failure: "{{ was_skip_on_su_wsadmin_failure | default(true) }}"
 
   tasks:
-    # ------------------------------------------------------------
-    # 0) Validate required vars early
-    # ------------------------------------------------------------
+    # ==========================================================================
+    # 1) Validate required variables
+    # ==========================================================================
     - name: Validate required vars (DMGR + node)
       ansible.builtin.assert:
         that:
@@ -48,9 +70,9 @@
           was_wsadmin_user, was_wsadmin_pass, and per-host was_node_name.
       become: false
 
-    # ------------------------------------------------------------
-    # 1) DMGR prechecks (branching diagnostics)
-    # ------------------------------------------------------------
+    # ==========================================================================
+    # 2) DMGR pre-checks - verify wsadmin.sh exists
+    # ==========================================================================
     - name: DMGR precheck - ensure wsadmin.sh exists
       ansible.builtin.stat:
         path: "{{ was_dmgr_profile }}/bin/wsadmin.sh"
@@ -59,13 +81,13 @@
       run_once: true
       become: false
 
-    - name: DMGR diag - collect profile listing when wsadmin.sh missing
+    - name: DMGR diag - collect diagnostics when wsadmin.sh missing
       when: not dmgr_wsadmin_stat.stat.exists
       block:
         - name: DMGR diag - list DMGR bin directory
           ansible.builtin.shell: >
             set -euo pipefail &&
-            ls -la "{{ was_dmgr_profile }}/bin" || true
+            ls -la "{{ was_dmgr_profile }}/bin" 2>&1 || echo "Directory not accessible"
           args:
             executable: /bin/bash
           register: dmgr_bin_ls
@@ -78,7 +100,7 @@
           ansible.builtin.shell: >
             set -euo pipefail &&
             id && whoami &&
-            ls -ld "{{ was_dmgr_profile }}" "{{ was_dmgr_profile }}/bin" || true
+            ls -ld "{{ was_dmgr_profile }}" "{{ was_dmgr_profile }}/bin" 2>&1 || true
           args:
             executable: /bin/bash
           register: dmgr_perm_diag
@@ -99,7 +121,10 @@
               {{ dmgr_perm_diag.stderr | default('') }}
       run_once: true
 
-    - name: DMGR precheck - ensure staging dir exists (deploy user)
+    # ==========================================================================
+    # 3) Stage wsadmin scripts to /tmp (no root required)
+    # ==========================================================================
+    - name: Ensure wsadmin staging directory exists on DMGR
       ansible.builtin.file:
         path: "{{ was_wsadmin_stage_dir }}"
         state: directory
@@ -108,11 +133,11 @@
       run_once: true
       become: false
 
-    - name: DMGR precheck - stage wsadmin scripts to DMGR staging dir (deploy user)
+    - name: Stage wsadmin scripts to DMGR (deploy user, no root)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../roles/was_wsadmin/files/{{ item }}"
         dest: "{{ was_wsadmin_stage_dir }}/{{ item }}"
-        mode: "0644"
+        mode: "0755"
       loop:
         - discover_targets.py
         - server_state.py
@@ -121,13 +146,12 @@
       run_once: true
       become: false
 
-    # ------------------------------------------------------------
-    # 1.5) NEW: Smoke test su-to-wsadmin on DMGR host
-    # If this fails, we collect diagnostics and skip discovery/probes
-    # ------------------------------------------------------------
-    - name: DMGR smoke test - can deploy su to wsadmin (non-disruptive)
+    # ==========================================================================
+    # 4) Smoke test - verify deploy can su to wsadmin
+    # ==========================================================================
+    - name: Smoke test - verify deploy can su to wsadmin
       block:
-        - name: su to wsadmin and run id/whoami
+        - name: Run su to wsadmin with id/whoami
           ansible.builtin.shell: >
             set -euo pipefail &&
             {{ was_su_wsadmin_prefix | quote }} "id && whoami"
@@ -145,6 +169,12 @@
           run_once: true
           become: false
 
+        - name: Show su-to-wsadmin success
+          ansible.builtin.debug:
+            msg: "SUCCESS: deploy can su to {{ was_run_user }} on DMGR host {{ was_dmgr_host }}"
+          run_once: true
+          become: false
+
       rescue:
         - name: Mark su-to-wsadmin FAILED
           ansible.builtin.set_fact:
@@ -152,7 +182,7 @@
           run_once: true
           become: false
 
-        - name: DMGR diag - deploy identity
+        - name: Collect diagnostic - deploy identity
           ansible.builtin.shell: >
             set -euo pipefail && id && whoami && groups
           args:
@@ -163,7 +193,7 @@
           changed_when: false
           become: false
 
-        - name: DMGR diag - su policy hints (best effort)
+        - name: Collect diagnostic - su policy hints (best effort)
           ansible.builtin.shell: >
             set -euo pipefail &&
             (test -r /etc/pam.d/su && sed -n '1,200p' /etc/pam.d/su) || echo "cannot read /etc/pam.d/su" &&
@@ -177,7 +207,7 @@
           changed_when: false
           become: false
 
-        - name: DMGR diag - tail /var/log/secure (best effort)
+        - name: Collect diagnostic - tail /var/log/secure (best effort)
           ansible.builtin.shell: >
             set -euo pipefail &&
             f="/var/log/secure" &&
@@ -190,28 +220,33 @@
           changed_when: false
           become: false
 
-        - name: Fail fast (cannot su to wsadmin) or skip later steps
-          when: not was_skip_on_su_wsadmin_failure | bool
-          ansible.builtin.fail:
+        - name: Show su-to-wsadmin failure diagnostics
+          ansible.builtin.debug:
             msg: |
-              deploy cannot su to wsadmin non-interactively on DMGR host {{ was_dmgr_host }}.
+              FAILURE: deploy cannot su to {{ was_run_user }} non-interactively on DMGR host {{ was_dmgr_host }}.
               This often manifests in AAP as: "Shared connection ... closed".
+
               Fix options:
-              - Allow deploy -> su - wsadmin without interactive restrictions on DMGR hosts, OR
-              - Use SSH as wsadmin for DMGR hosts (separate credential), OR
-              - Restore deploy -> su root -> su wsadmin flow with working escalation.
+                - Allow deploy -> su - wsadmin without interactive restrictions on DMGR hosts, OR
+                - Use SSH as wsadmin for DMGR hosts (separate credential), OR
+                - Review PAM/su configuration on the DMGR host.
 
               --- deploy identity ---
               {{ dmgr_deploy_id.stdout | default('') }}
-              {{ dmgr_deploy_id.stderr | default('') }}
 
               --- su policy hints ---
               {{ dmgr_su_policy.stdout | default('') }}
-              {{ dmgr_su_policy.stderr | default('') }}
 
               --- /var/log/secure tail ---
               {{ dmgr_secure_tail.stdout | default('') }}
-              {{ dmgr_secure_tail.stderr | default('') }}
+          run_once: true
+          become: false
+
+        - name: Fail fast if su-to-wsadmin failure is fatal
+          when: not was_skip_on_su_wsadmin_failure | bool
+          ansible.builtin.fail:
+            msg: "Cannot proceed: deploy cannot su to {{ was_run_user }} on DMGR host"
+          run_once: true
       run_once: true
 
     - name: Set skip flag for downstream steps (su-to-wsadmin failure)
@@ -220,9 +255,9 @@
       run_once: true
       become: false
 
-    # ------------------------------------------------------------
-    # SOAP reachability (only if su-to-wsadmin works)
-    # ------------------------------------------------------------
+    # ==========================================================================
+    # 5) SOAP reachability check (only if su-to-wsadmin works)
+    # ==========================================================================
     - name: DMGR precheck - SOAP port reachable from DMGR host
       when: not was_skip_due_to_su_wsadmin
       ansible.builtin.wait_for:
@@ -237,17 +272,17 @@
       failed_when: false
       changed_when: false
 
-    - name: Set DMGR health flags
+    - name: Set DMGR health flag
       when: not was_skip_due_to_su_wsadmin
       ansible.builtin.set_fact:
         was_dmgr_soap_reachable: "{{ (dmgr_soap_wait is not failed) and (dmgr_soap_wait.state is defined) and (dmgr_soap_wait.state == 'started') }}"
       run_once: true
       become: false
 
-    - name: DMGR diag - collect diagnostics when SOAP is not reachable
-      when: not was_skip_due_to_su_wsadmin and (not was_dmgr_soap_reachable)
+    - name: DMGR diag - collect diagnostics when SOAP not reachable
+      when: not was_skip_due_to_su_wsadmin and (not (was_dmgr_soap_reachable | default(false)))
       block:
-        - name: DMGR diag - netstat/ss for SOAP port
+        - name: Collect diagnostic - netstat/ss for SOAP port
           ansible.builtin.shell: >
             set -euo pipefail &&
             (command -v ss >/dev/null 2>&1 && ss -ltnp | grep -E '(:{{ was_dmgr_soap_port }}\s)') ||
@@ -261,7 +296,7 @@
           changed_when: false
           become: false
 
-        - name: DMGR diag - tail wsadmin.traceout (if present)
+        - name: Collect diagnostic - tail wsadmin.traceout (if present)
           ansible.builtin.shell: >
             set -euo pipefail &&
             f="{{ was_dmgr_profile }}/logs/wsadmin.traceout" &&
@@ -274,37 +309,22 @@
           changed_when: false
           become: false
 
-        - name: DMGR diag - attempt wsadmin connection (expected to fail; capture)
-          ansible.builtin.shell: >
-            set -euo pipefail &&
-            {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
-            ./wsadmin.sh -quiet -lang jython
-            -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
-            -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
-            -c 'print \"CONNECTED_OK\"' " || true
-          args:
-            executable: /bin/bash
-          register: dmgr_wsadmin_connect_attempt
-          delegate_to: "{{ was_dmgr_host }}"
-          run_once: true
-          changed_when: false
-          become: false
-
-        - name: Fail fast - DMGR SOAP not reachable
-          when: was_fail_fast_on_dmgr_unreachable | bool
-          ansible.builtin.fail:
+        - name: Show SOAP unreachable diagnostics
+          ansible.builtin.debug:
             msg: |
-              DMGR SOAP port {{ was_dmgr_soap_port }} NOT reachable on {{ was_dmgr_host }} (localhost).
-              Skipping discovery/probes.
+              FAILURE: DMGR SOAP port {{ was_dmgr_soap_port }} NOT reachable on {{ was_dmgr_host }} (localhost).
               --- Port listeners ---
               {{ dmgr_port_diag.stdout | default('') }}
-              {{ dmgr_port_diag.stderr | default('') }}
               --- wsadmin.traceout tail ---
               {{ dmgr_wsadmin_trace_tail.stdout | default('') }}
-              {{ dmgr_wsadmin_trace_tail.stderr | default('') }}
-              --- wsadmin connect attempt (captured) ---
-              {{ dmgr_wsadmin_connect_attempt.stdout | default('') }}
-              {{ dmgr_wsadmin_connect_attempt.stderr | default('') }}
+          run_once: true
+          become: false
+
+        - name: Fail fast if DMGR SOAP unreachable is fatal
+          when: was_fail_fast_on_dmgr_unreachable | bool
+          ansible.builtin.fail:
+            msg: "Cannot proceed: DMGR SOAP port {{ was_dmgr_soap_port }} not reachable"
+          run_once: true
       run_once: true
 
     - name: Set skip flag for downstream steps (DMGR health)
@@ -313,14 +333,21 @@
           {{
             was_skip_due_to_su_wsadmin
             or
-            ((was_skip_on_dmgr_issue | bool) and (not (was_dmgr_soap_reachable | default(false) | bool)))
+            (not (was_dmgr_soap_reachable | default(false) | bool))
           }}
       run_once: true
       become: false
 
-    # ------------------------------------------------------------
-    # 2) Discovery (skipped if DMGR unhealthy OR su-to-wsadmin fails)
-    # ------------------------------------------------------------
+    - name: Show SOAP reachability success
+      when: not was_skip_discovery_and_probes
+      ansible.builtin.debug:
+        msg: "SUCCESS: DMGR SOAP port {{ was_dmgr_soap_port }} is reachable on {{ was_dmgr_host }}"
+      run_once: true
+      become: false
+
+    # ==========================================================================
+    # 6) Discovery (skipped if DMGR unhealthy or su-to-wsadmin fails)
+    # ==========================================================================
     - name: Build node list from limited hosts
       when: not was_skip_discovery_and_probes
       ansible.builtin.set_fact:
@@ -334,13 +361,13 @@
       run_once: true
       become: false
 
-    - name: Discover application servers via DMGR (run as wsadmin; script from staging dir)
+    - name: Discover application servers via DMGR (run as wsadmin)
       when: not was_skip_discovery_and_probes
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
+        {{ was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
         ./wsadmin.sh -quiet -lang jython
-        -conntype SOAP -host {{ was_dmgr_host }} -port '{{ was_dmgr_soap_port }}'
+        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/discover_targets.py'
         --nodes {{ was_nodes_in_scope | join(' ') }}"
@@ -353,16 +380,13 @@
       failed_when: false
       become: false
 
-    # ------------------------ remainder unchanged ------------------------
-    # Keep the rest of your tasks exactly as-is below this point.
-    # --------------------------------------------------------------------
     - name: Discovery diag - show stdout/stderr if wsadmin failed
       when: not was_skip_discovery_and_probes and discovery_out.rc != 0
       block:
-        - name: Capture discovery stdout/stderr
+        - name: Show discovery failure output
           ansible.builtin.debug:
             msg: |
-              Discovery failed rc={{ discovery_out.rc }}
+              FAILURE: Discovery failed rc={{ discovery_out.rc }}
               --- stdout ---
               {{ discovery_out.stdout | default('') }}
               --- stderr ---
@@ -388,55 +412,41 @@
               Discover application servers via DMGR failed.
               --- wsadmin.traceout tail ---
               {{ wsadmin_trace_after_discovery.stdout | default('') }}
-              {{ wsadmin_trace_after_discovery.stderr | default('') }}
       run_once: true
 
-    - name: Extract JSON payload candidates from wsadmin output
+    # ==========================================================================
+    # 7) Parse discovery JSON output
+    # ==========================================================================
+    - name: Extract JSON payload from wsadmin output (last line)
       when: not was_skip_discovery_and_probes
       ansible.builtin.set_fact:
-        was_discovery_json_candidates: "{{ (discovery_out.stdout | string) | regex_findall('(?s)\\{.*?\\}(?=\\s*$)') }}"
+        was_discovery_json_raw: "{{ discovery_out.stdout_lines | default([]) | last | default('{}') }}"
       run_once: true
       become: false
 
     - name: Discovery diag - when JSON payload missing
-      when: not was_skip_discovery_and_probes and (was_discovery_json_candidates | length) == 0
+      when: not was_skip_discovery_and_probes and (was_discovery_json_raw | length <= 2 or was_discovery_json_raw is not match('^\\s*\\{.*\\}\\s*$'))
       block:
         - name: Show discovery output head/tail
           ansible.builtin.debug:
             msg: |
-              wsadmin output did not contain a trailing JSON object.
+              wsadmin output did not contain a valid JSON object on the last line.
+              Last line: {{ was_discovery_json_raw }}
               --- first 800 chars ---
-              {{ (discovery_out.stdout | string)[:800] }}
+              {{ (discovery_out.stdout | default(''))[:800] }}
               --- last 800 chars ---
-              {{ (discovery_out.stdout | string)[-800:] }}
+              {{ (discovery_out.stdout | default(''))[-800:] }}
           run_once: true
-
-        - name: Tail wsadmin.traceout after JSON-missing (if present)
-          ansible.builtin.shell: >
-            set -euo pipefail &&
-            f="{{ was_dmgr_profile }}/logs/wsadmin.traceout" &&
-            if [ -f "$f" ]; then tail -n 180 "$f"; else echo "No wsadmin.traceout at $f"; fi
-          args:
-            executable: /bin/bash
-          register: wsadmin_trace_after_json_missing
-          delegate_to: "{{ was_dmgr_host }}"
-          run_once: true
-          changed_when: false
-          become: false
 
         - name: Fail - JSON payload missing
           ansible.builtin.fail:
-            msg: |
-              wsadmin output missing JSON payload.
-              --- wsadmin.traceout tail ---
-              {{ wsadmin_trace_after_json_missing.stdout | default('') }}
-              {{ wsadmin_trace_after_json_missing.stderr | default('') }}
+            msg: "wsadmin output missing JSON payload"
       run_once: true
 
-    - name: Parse discovery JSON payload (last candidate)
+    - name: Parse discovery JSON payload
       when: not was_skip_discovery_and_probes
       ansible.builtin.set_fact:
-        was_discovery_json: "{{ (was_discovery_json_candidates | last | string) | from_json }}"
+        was_discovery_json: "{{ was_discovery_json_raw | from_json }}"
       run_once: true
       become: false
 
@@ -461,7 +471,7 @@
       run_once: true
       become: false
 
-    - name: Fail if discovery returns zero targets
+    - name: Assert at least one target discovered
       when: not was_skip_discovery_and_probes
       ansible.builtin.assert:
         that:
@@ -472,6 +482,16 @@
       run_once: true
       become: false
 
+    - name: Show discovered targets
+      when: not was_skip_discovery_and_probes
+      ansible.builtin.debug:
+        msg: "SUCCESS: Discovered {{ was_discovered_targets | length }} application server(s): {{ was_discovered_targets | map(attribute='server') | list }}"
+      run_once: true
+      become: false
+
+    # ==========================================================================
+    # 8) Query runtime state for each discovered server
+    # ==========================================================================
     - name: Query runtime state for each discovered server (run as wsadmin)
       when: not was_skip_discovery_and_probes
       ansible.builtin.shell: >
@@ -495,9 +515,25 @@
       failed_when: false
       become: false
 
-    - name: Summarize current states
+    - name: Summarize server states
       when: not was_skip_discovery_and_probes
       ansible.builtin.debug:
         msg: "{{ state_out.results | map(attribute='stdout') | list }}"
+      run_once: true
+      become: false
+
+    # ==========================================================================
+    # 9) Final summary
+    # ==========================================================================
+    - name: Validation summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          VALIDATION SUMMARY for {{ was_dmgr_host }}
+          ============================================================
+          su-to-wsadmin:     {{ 'PASS' if (was_can_su_to_wsadmin | default(false)) else 'FAIL/SKIPPED' }}
+          DMGR SOAP:         {{ 'PASS' if (was_dmgr_soap_reachable | default(false)) else 'FAIL/SKIPPED' }}
+          Discovery:         {{ 'PASS (' ~ (was_discovered_targets | default([]) | length) ~ ' servers)' if not was_skip_discovery_and_probes else 'SKIPPED' }}
+          ============================================================
       run_once: true
       become: false
