@@ -1,13 +1,29 @@
 # -*- coding: utf-8 -*-
+# =============================================================================
+# discover_targets.py
+# Discovers APPLICATION_SERVER instances for specified WebSphere nodes
+#
+# Usage:
+#   wsadmin.sh -lang jython -f discover_targets.py --nodes Node01 Node02 ...
+#
+# Output:
+#   JSON object on the last line of stdout:
+#   {"targets":[{"node":"Node01","server":"AppSrv01","serverType":"APPLICATION_SERVER"}, ...]}
+#
+# Nodes not found are reported with: {"node":"NodeX","error":"NODE_NOT_FOUND"}
+# =============================================================================
 import sys
 
 def _args_after(flag):
+    """Return all arguments after the specified flag."""
     if flag not in sys.argv:
         return []
     idx = sys.argv.index(flag)
     return sys.argv[idx + 1:]
 
+
 def _escape_json_string(s):
+    """Escape a string for JSON output."""
     if s is None:
         s = ""
     try:
@@ -22,7 +38,9 @@ def _escape_json_string(s):
     s = s.replace("\t", "\\t")
     return s
 
+
 def _json_value(v):
+    """Convert a Python value to JSON representation."""
     if v is None:
         return "null"
 
@@ -49,7 +67,9 @@ def _json_value(v):
 
     return "\"" + _escape_json_string(v) + "\""
 
+
 def _json_obj(d):
+    """Convert a dictionary to a JSON object string."""
     parts = []
     keys = list(d.keys())
     keys.sort()
@@ -61,13 +81,16 @@ def _json_obj(d):
         i += 1
     return "{" + ",".join(parts) + "}"
 
+
 def _json_array_of_objects(objs):
+    """Convert a list of dictionaries to a JSON array string."""
     parts = []
     i = 0
     while i < len(objs):
         parts.append(_json_obj(objs[i]))
         i += 1
     return "[" + ",".join(parts) + "]"
+
 
 def main():
     nodes = _args_after("--nodes")
@@ -106,11 +129,19 @@ def main():
                 "serverType": stype
             })
 
+    # Build JSON output
     out = "{"
     out += "\"targets\":" + _json_array_of_objects(results)
     out += "}"
-    sys.stdout.write(out)
+
+    # IMPORTANT: Write JSON on its own line for reliable parsing
+    # First flush any pending output, then write newline + JSON + newline
     sys.stdout.flush()
+    sys.stdout.write("\n")
+    sys.stdout.write(out)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
 
 try:
     main()
