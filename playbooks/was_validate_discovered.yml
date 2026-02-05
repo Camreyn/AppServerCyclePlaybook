@@ -34,17 +34,13 @@
   gather_facts: false
   serial: 1
 
-  # Privilege escalation: deploy → root (via su), then tasks use su - wsadmin -c
-  become: true
-  become_user: root
-  become_method: su
-
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
 
-    # Wrapper: run a command as wsadmin (no Ansible become required)
-    was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
+    # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
+    # This matches the command-line pattern: sudo su - wsadmin -c "command"
+    was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
 
     # Where we stage Jython scripts on the DMGR host (no root required)
     was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
@@ -163,9 +159,10 @@
           args:
             executable: /bin/bash
           register: su_wsadmin_test
+          delegate_to: "{{ was_dmgr_host }}"
           run_once: true
           changed_when: false
-          become: true
+          become: false
 
         - name: Mark su-to-wsadmin OK
           ansible.builtin.set_fact:
@@ -382,7 +379,7 @@
       run_once: true
       changed_when: false
       failed_when: false
-      become: true
+      become: false
 
     - name: Discovery diag - show stdout/stderr if wsadmin failed
       when: not was_skip_discovery_and_probes and discovery_out.rc != 0
@@ -517,7 +514,7 @@
       run_once: true
       changed_when: false
       failed_when: false
-      become: true
+      become: false
 
     - name: Summarize server states
       when: not was_skip_discovery_and_probes
