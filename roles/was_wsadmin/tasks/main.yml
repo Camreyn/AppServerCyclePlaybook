@@ -1,28 +1,72 @@
 ---
-- name: Copy wsadmin scripts to DMGR profile bin (run once)
+# =============================================================================
+# roles/was_wsadmin/tasks/main.yml
+# Execute wsadmin scripts on DMGR host
+#
+# This role:
+#   1. Stages wsadmin scripts to a temp directory (no root required)
+#   2. Runs the specified script via wsadmin.sh as the wsadmin user
+#
+# Required variables:
+#   - was_dmgr_host: DMGR hostname (delegate target)
+#   - was_dmgr_profile: Path to DMGR profile
+#   - was_wsadmin_user: wsadmin SOAP authentication user
+#   - was_wsadmin_pass: wsadmin SOAP authentication password
+#   - was_wsadmin_script: Script filename to run (e.g., "discover_targets.py")
+#
+# Optional variables:
+#   - was_wsadmin_args: List of arguments to pass to the script (default: [])
+#   - was_run_user: OS user to run wsadmin as (default: wsadmin)
+#   - was_dmgr_soap_port: DMGR SOAP port (default: 8879)
+#   - was_wsadmin_stage_dir: Where to stage scripts (default: /tmp/was_wsadmin_scripts)
+#
+# Output:
+#   - wsadmin_run: Registered result of the wsadmin command
+# =============================================================================
+
+- name: Set default variables
+  ansible.builtin.set_fact:
+    _was_run_user: "{{ was_run_user | default('wsadmin') }}"
+    _was_wsadmin_stage_dir: "{{ was_wsadmin_stage_dir | default('/tmp/was_wsadmin_scripts') }}"
+    _was_dmgr_soap_port: "{{ was_dmgr_soap_port | default(8879) }}"
+    _was_su_wsadmin_prefix: "/bin/su - {{ was_run_user | default('wsadmin') }} -c"
+  become: false
+
+- name: Ensure wsadmin staging directory exists on DMGR
+  ansible.builtin.file:
+    path: "{{ _was_wsadmin_stage_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ was_dmgr_host }}"
+  run_once: true
+  become: false
+
+- name: Stage wsadmin scripts to DMGR (deploy user, no root)
   ansible.builtin.copy:
     src: "{{ item }}"
-    dest: "{{ was_dmgr_profile }}/bin/{{ item }}"
+    dest: "{{ _was_wsadmin_stage_dir }}/{{ item }}"
     mode: "0755"
   loop:
     - discover_targets.py
+    - server_state.py
     - control_server.py
   delegate_to: "{{ was_dmgr_host }}"
   run_once: true
+  become: false
 
 - name: Run wsadmin script {{ was_wsadmin_script }} with args {{ was_wsadmin_args | default([]) }}
   ansible.builtin.shell: >
     set -euo pipefail &&
-    cd "{{ was_dmgr_profile }}/bin" &&
-    ./wsadmin.sh
-    -lang jython
-    -user "{{ was_wsadmin_user }}"
-    -password "{{ was_wsadmin_pass }}"
-    -f "./{{ was_wsadmin_script }}"
-    {% for a in was_wsadmin_args | default([]) %} {{ a }} {% endfor %}
+    {{ _was_su_wsadmin_prefix | quote }} "cd '{{ was_dmgr_profile }}/bin' &&
+    ./wsadmin.sh -quiet -lang jython
+    -conntype SOAP -host 127.0.0.1 -port '{{ _was_dmgr_soap_port }}'
+    -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
+    -f '{{ _was_wsadmin_stage_dir }}/{{ was_wsadmin_script }}'
+    {% for a in was_wsadmin_args | default([]) %} {{ a | quote }} {% endfor %}"
   args:
     executable: /bin/bash
   register: wsadmin_run
   delegate_to: "{{ was_dmgr_host }}"
   changed_when: false
   failed_when: wsadmin_run.rc != 0
+  become: false
