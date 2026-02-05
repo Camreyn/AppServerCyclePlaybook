@@ -37,17 +37,12 @@
   gather_facts: false
   serial: 1
 
-  # Privilege escalation: deploy → root (via su), then tasks use su - wsadmin -c
-  become: true
-  become_user: root
-  become_method: su
-
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
-
-    # Wrapper: run a command as wsadmin (no Ansible become required)
-    was_su_wsadmin_prefix: "/bin/su - {{ was_run_user }} -c"
+    # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
+    # This matches the command-line pattern: sudo su - wsadmin -c "command"
+    was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
 
     # Where we stage Jython scripts on the DMGR host (no root required)
     was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
@@ -158,7 +153,7 @@
           delegate_to: "{{ was_dmgr_host }}"
           run_once: true
           changed_when: false
-          become: true
+          become: false
 
       rescue:
         - name: Collect diagnostic - deploy identity
@@ -215,7 +210,7 @@
         ("ADMU0116I" not in (dmgr_start.stdout | default(''))) and
         ("already running" not in (dmgr_start.stdout | default('') | lower)) and
         ("already started" not in (dmgr_start.stdout | default('') | lower))
-      become: true
+      become: false
 
     - name: Show DMGR start result
       when: was_start_dmgr | bool
@@ -254,7 +249,7 @@
         ("ADMU0116I" not in (nodeagent_start.stdout | default(''))) and
         ("already running" not in (nodeagent_start.stdout | default('') | lower)) and
         ("already started" not in (nodeagent_start.stdout | default('') | lower))
-      become: true
+      become: false
 
     - name: Show nodeagent start result
       when: was_start_nodeagent | bool
@@ -293,7 +288,7 @@
       run_once: true
       changed_when: false
       failed_when: discovery_out.rc != 0
-      become: true
+      become: false
 
     # ==========================================================================
     # Parse discovery JSON output
@@ -384,7 +379,7 @@
       run_once: true
       changed_when: (start_out.stdout | default('')) is search('CHANGED:true')
       failed_when: start_out.rc != 0
-      become: true
+      become: false
 
     - name: Show start results
       ansible.builtin.debug:
@@ -421,7 +416,7 @@
           (verify_out.stdout | default('')) is not search('=RUNNING') and
           (verify_out.stdout | default('')) is not search('=STARTED')
         )
-      become: true
+      become: false
 
     - name: Show verification results
       when: was_verify_after_start | bool
