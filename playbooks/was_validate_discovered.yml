@@ -420,27 +420,48 @@
     - name: Extract JSON payload from wsadmin output
       when: not was_skip_discovery_and_probes
       ansible.builtin.set_fact:
-        # First try to find JSON with double quotes, then try single quotes
+        # Extract the dict/JSON structure from the output
         was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
       run_once: true
       become: false
 
-    - name: Normalize JSON payload (convert single quotes to double quotes)
+    - name: Debug - show extracted payload
       when: not was_skip_discovery_and_probes
-      ansible.builtin.set_fact:
-        was_discovery_json_raw: "{{ was_discovery_json_extracted | regex_replace(\"'\", '\"') }}"
+      ansible.builtin.debug:
+        msg: 
+          - "Extracted length: {{ was_discovery_json_extracted | length }}"
+          - "Extracted type: {{ was_discovery_json_extracted | type_debug }}"
+          - "First 200 chars: {{ was_discovery_json_extracted[:200] | default('EMPTY') }}"
       run_once: true
       become: false
 
-    - name: Discovery diag - when JSON payload missing
-      when: not was_skip_discovery_and_probes and (was_discovery_json_raw | length < 15)
+    - name: Normalize and parse discovery payload
+      when: not was_skip_discovery_and_probes and (was_discovery_json_extracted | length > 15)
+      vars:
+        single_quote: "'"
+        double_quote: '"'
+      ansible.builtin.set_fact:
+        was_discovery_json_raw: "{{ was_discovery_json_extracted | replace(single_quote, double_quote) }}"
+      run_once: true
+      become: false
+
+    - name: Debug - show normalized payload
+      when: not was_skip_discovery_and_probes and (was_discovery_json_extracted | length > 15)
+      ansible.builtin.debug:
+        msg:
+          - "Normalized length: {{ was_discovery_json_raw | length }}"
+          - "First 200 chars: {{ was_discovery_json_raw[:200] | default('EMPTY') }}"
+      run_once: true
+      become: false
+
+    - name: Discovery diag - when extraction failed
+      when: not was_skip_discovery_and_probes and (was_discovery_json_extracted | length <= 15)
       block:
         - name: Show discovery output head/tail
           ansible.builtin.debug:
             msg: |
               wsadmin output did not contain a valid JSON object.
               Extracted: {{ was_discovery_json_extracted }}
-              Normalized: {{ was_discovery_json_raw }}
               --- first 800 chars ---
               {{ (discovery_out.stdout | default(''))[:800] }}
               --- last 800 chars ---
@@ -453,7 +474,7 @@
       run_once: true
 
     - name: Parse discovery JSON payload
-      when: not was_skip_discovery_and_probes
+      when: not was_skip_discovery_and_probes and (was_discovery_json_extracted | length > 15)
       ansible.builtin.set_fact:
         was_discovery_json: "{{ was_discovery_json_raw | from_json }}"
       run_once: true
