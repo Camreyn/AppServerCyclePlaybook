@@ -130,9 +130,8 @@ def main():
             })
 
     # Build JSON output
-    out = "{"
-    out += "\"targets\":" + _json_array_of_objects(results)
-    out += "}"
+    payload = {"targets": results}
+    out = json.dumps(payload, separators=(',', ':'))
 
     # IMPORTANT: Write JSON on its own line for reliable parsing
     # First flush any pending output, then write newline + JSON + newline
