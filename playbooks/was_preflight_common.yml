@@ -339,33 +339,38 @@
 # ----------------------------------------------------------------------------
 - name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
-    # First try to find JSON with double quotes, then try single quotes
+    # Extract the dict/JSON structure from the output
     was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
   run_once: true
   become: false
 
-- name: Normalize JSON payload (convert single quotes to double quotes)
+- name: Use extracted payload directly (if already a dict)
+  when: was_discovery_json_extracted | type_debug == 'dict'
   ansible.builtin.set_fact:
-    was_discovery_json_raw: "{{ was_discovery_json_extracted | regex_replace(\"'\", '\"') }}"
+    was_discovery_json: "{{ was_discovery_json_extracted }}"
+  run_once: true
+  become: false
+
+- name: Parse as JSON string (if still a string)
+  when: was_discovery_json_extracted | type_debug == 'str' and was_discovery_json_extracted | length > 15
+  vars:
+    single_quote: "'"
+    double_quote: '"'
+  ansible.builtin.set_fact:
+    was_discovery_json: "{{ was_discovery_json_extracted | replace(single_quote, double_quote) | from_json }}"
   run_once: true
   become: false
 
 - name: Validate JSON payload exists
   ansible.builtin.assert:
     that:
-      - was_discovery_json_raw | length > 15
+      - was_discovery_json is defined
+      - was_discovery_json.targets is defined
     fail_msg: |
       wsadmin output did not contain a valid JSON object.
-      Extracted: {{ was_discovery_json_extracted }}
-      Normalized: {{ was_discovery_json_raw }}
+      Extracted type: {{ was_discovery_json_extracted | type_debug }}
       --- Full stdout (first 800 chars) ---
       {{ (discovery_out.stdout | default(''))[:800] }}
-  run_once: true
-  become: false
-
-- name: Parse discovery JSON payload
-  ansible.builtin.set_fact:
-    was_discovery_json: "{{ was_discovery_json_raw | from_json }}"
   run_once: true
   become: false
 
