@@ -337,20 +337,19 @@
 # ----------------------------------------------------------------------------
 # 7) Parse discovery JSON output
 # ----------------------------------------------------------------------------
-- name: Extract JSON payload from wsadmin output (last line)
+- name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
-    was_discovery_json_raw: "{{ discovery_out.stdout_lines | default([]) | last | default('{}') }}"
+    was_discovery_json_raw: "{{ discovery_out.stdout | default('') | regex_search('\\{\"targets\":\\[.*\\]\\}') | default('') }}"
   run_once: true
   become: false
 
 - name: Validate JSON payload exists
   ansible.builtin.assert:
     that:
-      - was_discovery_json_raw | length > 2
-      - was_discovery_json_raw is match('^\\s*\\{.*\\}\\s*$')
+      - was_discovery_json_raw | length > 15
     fail_msg: |
-      wsadmin output did not contain a valid JSON object on the last line.
-      Last line: {{ was_discovery_json_raw }}
+      wsadmin output did not contain a valid JSON object.
+      Extracted: {{ was_discovery_json_raw }}
       --- Full stdout (first 800 chars) ---
       {{ (discovery_out.stdout | default(''))[:800] }}
   run_once: true
