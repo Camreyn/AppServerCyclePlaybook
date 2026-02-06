@@ -37,7 +37,6 @@
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
-
     # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
     # This matches the command-line pattern: sudo su - wsadmin -c "command"
     was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
@@ -421,7 +420,15 @@
     - name: Extract JSON payload from wsadmin output
       when: not was_skip_discovery_and_probes
       ansible.builtin.set_fact:
-        was_discovery_json_raw: "{{ discovery_out.stdout | default('') | regex_search('\\{\"targets\":\\[.*\\]\\}') | default('') }}"
+        # First try to find JSON with double quotes, then try single quotes
+        was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
+      run_once: true
+      become: false
+
+    - name: Normalize JSON payload (convert single quotes to double quotes)
+      when: not was_skip_discovery_and_probes
+      ansible.builtin.set_fact:
+        was_discovery_json_raw: "{{ was_discovery_json_extracted | regex_replace(\"'\", '\"') }}"
       run_once: true
       become: false
 
@@ -432,7 +439,8 @@
           ansible.builtin.debug:
             msg: |
               wsadmin output did not contain a valid JSON object.
-              Extracted: {{ was_discovery_json_raw }}
+              Extracted: {{ was_discovery_json_extracted }}
+              Normalized: {{ was_discovery_json_raw }}
               --- first 800 chars ---
               {{ (discovery_out.stdout | default(''))[:800] }}
               --- last 800 chars ---
