@@ -339,7 +339,14 @@
 # ----------------------------------------------------------------------------
 - name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
-    was_discovery_json_raw: "{{ discovery_out.stdout | default('') | regex_search('\\{\"targets\":\\[.*\\]\\}') | default('') }}"
+    # First try to find JSON with double quotes, then try single quotes
+    was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
+  run_once: true
+  become: false
+
+- name: Normalize JSON payload (convert single quotes to double quotes)
+  ansible.builtin.set_fact:
+    was_discovery_json_raw: "{{ was_discovery_json_extracted | regex_replace(\"'\", '\"') }}"
   run_once: true
   become: false
 
@@ -349,7 +356,8 @@
       - was_discovery_json_raw | length > 15
     fail_msg: |
       wsadmin output did not contain a valid JSON object.
-      Extracted: {{ was_discovery_json_raw }}
+      Extracted: {{ was_discovery_json_extracted }}
+      Normalized: {{ was_discovery_json_raw }}
       --- Full stdout (first 800 chars) ---
       {{ (discovery_out.stdout | default(''))[:800] }}
   run_once: true
