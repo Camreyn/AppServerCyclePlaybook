@@ -35,6 +35,7 @@
   vars:
     # OS user that should run wsadmin.sh
     was_run_user: "wsadmin"
+
     # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
     # This matches the command-line pattern: sudo su - wsadmin -c "command"
     was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
