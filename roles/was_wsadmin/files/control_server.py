@@ -64,29 +64,33 @@ def _state(node, server):
 
 def _wait_for(node, server, desired_states):
     """Wait for a server to reach one of the desired states."""
+    _log("Entering _wait_for, looking for states: %s" % str(desired_states))
     start = time.time()
     attempts = 0
     while True:
         attempts = attempts + 1
+        _log("Attempt %d: checking state..." % attempts)
         try:
             st = _state(node, server)
+            _log("Attempt %d: state = %s" % (attempts, st))
         except:
             st = "ERROR_CHECKING"
+            _log("Attempt %d: exception checking state, using ERROR_CHECKING" % attempts)
         
         if st in desired_states:
             _log("Reached state %s after %d attempts" % (st, attempts))
             return st
         
         elapsed = time.time() - start
+        _log("Attempt %d: elapsed = %d seconds" % (attempts, int(elapsed)))
+        
         if elapsed > TIMEOUT:
             raise Exception(
                 "Timed out after %d seconds waiting for %s/%s to reach %s (last=%s, attempts=%d)" %
                 (int(elapsed), node, server, ",".join(desired_states), st, attempts)
             )
         
-        if attempts % 10 == 0:
-            _log("Still waiting for %s/%s, current state=%s, elapsed=%ds" % (node, server, st, int(elapsed)))
-        
+        _log("Attempt %d: sleeping %d seconds..." % (attempts, DELAY))
         time.sleep(DELAY)
 
 def _is_already_down_exception(exc):
