@@ -36,7 +36,7 @@
 
     - name: Wait for SSH connectivity (pre-reboot)
       ansible.builtin.wait_for_connection:
-        timeout: "{{ was_reboot_precheck_timeout_sec | default(120) }}"
+        timeout: "120"
 
     - name: Reboot host
       ansible.builtin.reboot:
