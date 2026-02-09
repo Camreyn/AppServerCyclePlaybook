@@ -130,7 +130,10 @@ def _get_exception_message(exc):
     
     if not msg or msg == "true" or msg == "false":
         try:
-            msg = exc.args[0] if exc.args else "unknown"
+            if exc.args:
+                msg = exc.args[0]
+            else:
+                msg = "unknown"
         except:
             pass
     
