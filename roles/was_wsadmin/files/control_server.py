@@ -67,46 +67,45 @@ def _state(node, server):
 def _wait_for(node, server, desired_states):
     """Wait for a server to reach one of the desired states."""
     _log("Entering _wait_for")
-    _log("Desired states: STARTED, RUNNING or STOPPED, NOT_FOUND")
+    _log("Node: %s Server: %s" % (node, server))
+    
     start = time.time()
-    _log("Timer started")
     attempts = 0
-    _log("Starting loop")
-    while True:
+    
+    _log("About to enter loop")
+    
+    while 1:
+        _log("In loop")
         attempts = attempts + 1
-        _log("Attempt %d" % attempts)
-        st = "UNKNOWN"
-        try:
-            _log("Calling _state...")
-            st = _state(node, server)
-            _log("State result: %s" % st)
-        except:
-            st = "ERROR_CHECKING"
-            _log("Exception in _state, using ERROR_CHECKING")
+        _log("Attempt number: %d" % attempts)
         
-        _log("Checking if %s in desired states" % st)
-        found = 0
-        for ds in desired_states:
-            if st == ds:
-                found = 1
-                break
+        # Check state
+        _log("About to check state")
+        st = _state(node, server)
+        _log("Got state: %s" % st)
         
-        if found:
-            _log("Reached desired state %s after %d attempts" % (st, attempts))
-            return st
+        # Check if done
+        if st == "STOPPED" or st == "NOT_FOUND" or st == "STARTED" or st == "RUNNING":
+            is_desired = 0
+            for ds in desired_states:
+                if st == ds:
+                    is_desired = 1
+            if is_desired:
+                _log("Reached desired state")
+                return st
         
+        # Check timeout
         elapsed = time.time() - start
-        _log("Elapsed: %d seconds" % int(elapsed))
+        _log("Elapsed seconds: %d" % int(elapsed))
         
         if elapsed > TIMEOUT:
-            raise Exception(
-                "Timed out after %d seconds waiting for %s/%s to reach desired state (last=%s, attempts=%d)" %
-                (int(elapsed), node, server, st, attempts)
-            )
+            _log("Timeout reached")
+            raise Exception("Timed out waiting for server state change")
         
-        _log("Sleeping %d seconds" % DELAY)
+        # Sleep
+        _log("Sleeping")
         time.sleep(DELAY)
-        _log("Woke up from sleep")
+        _log("Done sleeping")
 
 def _is_already_down_exception(exc):
     """Check if an exception indicates the server is already stopped."""
