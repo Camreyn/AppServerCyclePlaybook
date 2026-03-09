@@ -5,9 +5,6 @@
 # Include this at the start of was_stop_discovered.yml and was_start_discovered.yml
 # =============================================================================
 
-# ----------------------------------------------------------------------------
-# 0) Safety check - require explicit approval for disruptive actions
-# ----------------------------------------------------------------------------
 - name: Safety check - require explicit approval for disruptive actions
   ansible.builtin.assert:
     that:
@@ -18,9 +15,6 @@
   run_once: true
   become: false
 
-# ----------------------------------------------------------------------------
-# 1) Validate required variables
-# ----------------------------------------------------------------------------
 - name: Validate required vars (DMGR + node)
   ansible.builtin.assert:
     that:
@@ -38,9 +32,6 @@
       (was_node_name) are set via inventory or survey.
   become: false
 
-# ----------------------------------------------------------------------------
-# 2) Resolve wsadmin.sh on the DMGR host
-# ----------------------------------------------------------------------------
 - name: Resolve wsadmin.sh path on the DMGR host
   ansible.builtin.include_tasks:
     file: was_resolve_was_scripts.yml
@@ -69,9 +60,6 @@
   run_once: true
   become: false
 
-# ----------------------------------------------------------------------------
-# 3) Stage wsadmin scripts to /tmp (no root required)
-# ----------------------------------------------------------------------------
 - name: Ensure wsadmin staging directory exists on DMGR
   ansible.builtin.file:
     path: "{{ was_wsadmin_stage_dir }}"
@@ -94,9 +82,6 @@
   run_once: true
   become: false
 
-# ----------------------------------------------------------------------------
-# 4) Smoke test - verify deploy can su to wsadmin
-# ----------------------------------------------------------------------------
 - name: Smoke test - verify deploy can su to wsadmin
   block:
     - name: Run su to wsadmin with id/whoami
@@ -186,9 +171,6 @@
           {{ dmgr_secure_tail.stderr | default('') }}
   run_once: true
 
-# ----------------------------------------------------------------------------
-# 5) Wait for DMGR SOAP port to be reachable
-# ----------------------------------------------------------------------------
 - name: Wait for DMGR SOAP port to be reachable (local check on DMGR host)
   ansible.builtin.wait_for:
     host: "127.0.0.1"
@@ -246,9 +228,6 @@
           {{ dmgr_wsadmin_trace_tail.stderr | default('') }}
   run_once: true
 
-# ----------------------------------------------------------------------------
-# 6) Build node list and discover application servers
-# ----------------------------------------------------------------------------
 - name: Build node list from limited hosts
   ansible.builtin.set_fact:
     was_nodes_in_scope: >-
@@ -314,9 +293,6 @@
           {{ wsadmin_trace_after_discovery.stderr | default('') }}
   run_once: true
 
-# ----------------------------------------------------------------------------
-# 7) Parse discovery JSON output
-# ----------------------------------------------------------------------------
 - name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
     was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
