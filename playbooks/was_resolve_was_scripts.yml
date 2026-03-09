@@ -43,13 +43,13 @@
       }}
   become: false
 
-- name: Reduce to direct-profile bin matches
+- name: Reduce to direct profile bin matches
   ansible.builtin.set_fact:
     was_script_direct_candidates: >-
       {{
         was_script_find_result.files
         | map(attribute='path')
-        | select('match', '^/opt/WebSphere/AppServer/[^/]+/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
+        | select('match', '^/opt/WebSphere/AppServer/profiles/[^/]+/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
         | list
       }}
   become: false
@@ -60,7 +60,7 @@
       {{
         (
           was_script_direct_candidates
-          | select('search', '/(' ~ was_profile_hint_regex ~ ')[^/]*/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
+          | select('search', '/profiles/(' ~ was_profile_hint_regex ~ ')[^/]*/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
           | list
         )
         if (was_profile_hint_regex | length > 0)
