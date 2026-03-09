@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# was_resolve_was_scripts.yml
+#
+# Reusable include to resolve a single WebSphere script path on a target host.
+#
+# Required vars:
+#   - was_resolve_delegate_host: Host on which to search
+#   - was_resolve_find_filename: Script basename to find (e.g. wsadmin.sh, stopNode.sh)
+#   - was_resolve_result_var: Fact name to set with the resolved full path
+#
+# Consumes:
+#   - was_was_roots
+#   - was_profile_name_hints
+# =============================================================================
+
+- name: Find {{ was_resolve_find_filename }} candidates on {{ was_resolve_delegate_host }}
+  ansible.builtin.find:
+    paths: "{{ was_was_roots }}"
+    patterns:
+      - "{{ was_resolve_find_filename }}"
+    recurse: true
+    file_type: file
+  register: was_script_find_result
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  become: false
+
+- name: Build profile hint regex
+  ansible.builtin.set_fact:
+    was_profile_hint_regex: "{{ was_profile_name_hints | map('regex_escape') | join('|') }}"
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  delegate_facts: true
+  become: false
+
+- name: Reduce to direct-profile bin matches
+  ansible.builtin.set_fact:
+    was_script_direct_candidates: >-
+      {{
+        was_script_find_result.files
+        | map(attribute='path')
+        | select('match', '^/opt/WebSphere/AppServer/[^/]+/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
+        | list
+      }}
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  delegate_facts: true
+  become: false
+
+- name: Prefer candidate paths whose profile names match known families
+  ansible.builtin.set_fact:
+    was_script_preferred_candidates: >-
+      {{
+        was_script_direct_candidates
+        | select('search', '/(' ~ was_profile_hint_regex ~ ')[^/]*/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
+        | list
+      }}
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  delegate_facts: true
+  become: false
+
+- name: Choose final candidate list
+  ansible.builtin.set_fact:
+    was_script_final_candidates: >-
+      {{
+        was_script_preferred_candidates
+        if (was_script_preferred_candidates | length) > 0
+        else was_script_direct_candidates
+      }}
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  delegate_facts: true
+  become: false
+
+- name: Fail when {{ was_resolve_find_filename }} is ambiguous or missing
+  ansible.builtin.fail:
+    msg: >-
+      Expected exactly one {{ was_resolve_find_filename }} on {{ was_resolve_delegate_host }},
+      found {{ was_script_final_candidates | length }} candidate(s):
+      {{ was_script_final_candidates }}
+  when: was_script_final_candidates | length != 1
+  delegate_to: "{{ was_resolve_delegate_host }}"
+  become: false
+
+- name: Set resolved path fact {{ was_resolve_result_var }}
+  ansible.builtin.set_fact:
+    "{{ was_resolve_result_var }}": "{{ was_script_final_candidates[0] }}"
+  become: false
