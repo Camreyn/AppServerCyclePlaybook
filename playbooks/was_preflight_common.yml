@@ -25,69 +25,49 @@
   ansible.builtin.assert:
     that:
       - was_dmgr_host is defined
-      - was_dmgr_profile is defined
+      - was_dmgr_host | length > 0
       - was_wsadmin_user is defined
+      - was_wsadmin_user | length > 0
       - was_wsadmin_pass is defined
-      - was_node_profile_path is defined
-      - was_node_profile_path | length > 0
+      - was_wsadmin_pass | length > 0
       - was_node_name is defined
       - was_node_name | length > 0
     fail_msg: >
-      Missing required variables. Ensure DMGR vars (was_dmgr_host, was_dmgr_profile,
-      was_wsadmin_user, was_wsadmin_pass) and per-host node vars (was_node_profile_path,
-      was_node_name) are set via inventory or survey.
+      Missing required variables. Ensure DMGR vars (was_dmgr_host,
+      was_wsadmin_user, was_wsadmin_pass) and per-host node vars
+      (was_node_name) are set via inventory or survey.
   become: false
 
 # ----------------------------------------------------------------------------
-# 2) DMGR pre-checks - verify wsadmin.sh exists
+# 2) Resolve wsadmin.sh on the DMGR host
 # ----------------------------------------------------------------------------
-- name: DMGR precheck - ensure wsadmin.sh exists
-  ansible.builtin.stat:
-    path: "{{ was_dmgr_profile }}/bin/wsadmin.sh"
-  register: dmgr_wsadmin_stat
-  delegate_to: "{{ was_dmgr_host }}"
+- name: Resolve wsadmin.sh path on the DMGR host
+  ansible.builtin.include_tasks:
+    file: was_resolve_was_scripts.yml
+  vars:
+    was_resolve_delegate_host: "{{ was_dmgr_host }}"
+    was_resolve_find_filename: "wsadmin.sh"
+    was_resolve_result_var: "was_resolved_wsadmin_path"
+    was_resolve_profile_hints: "{{ was_dmgr_profile_name_hints | default([]) }}"
+  run_once: true
+
+- name: Derive DMGR trace path from resolved wsadmin.sh
+  ansible.builtin.set_fact:
+    was_resolved_wsadmin_trace_path: >-
+      {{
+        was_resolved_wsadmin_path
+        | regex_replace('/bin/wsadmin\\.sh$', '/logs/wsadmin.traceout')
+      }}
   run_once: true
   become: false
 
-- name: DMGR diag - collect diagnostics when wsadmin.sh missing
-  when: not dmgr_wsadmin_stat.stat.exists
-  block:
-    - name: DMGR diag - list DMGR bin directory
-      ansible.builtin.shell: >
-        set -euo pipefail &&
-        ls -la "{{ was_dmgr_profile }}/bin" 2>&1 || echo "Directory not accessible"
-      args:
-        executable: /bin/bash
-      register: dmgr_bin_ls
-      delegate_to: "{{ was_dmgr_host }}"
-      run_once: true
-      changed_when: false
-      become: false
-
-    - name: DMGR diag - show filesystem and permissions
-      ansible.builtin.shell: >
-        set -euo pipefail &&
-        id && whoami &&
-        ls -ld "{{ was_dmgr_profile }}" "{{ was_dmgr_profile }}/bin" 2>&1 || true
-      args:
-        executable: /bin/bash
-      register: dmgr_perm_diag
-      delegate_to: "{{ was_dmgr_host }}"
-      run_once: true
-      changed_when: false
-      become: false
-
-    - name: Fail - wsadmin.sh missing on DMGR
-      ansible.builtin.fail:
-        msg: |
-          wsadmin.sh not found at {{ was_dmgr_profile }}/bin/wsadmin.sh on DMGR host {{ was_dmgr_host }}.
-          --- ls -la bin ---
-          {{ dmgr_bin_ls.stdout | default('') }}
-          {{ dmgr_bin_ls.stderr | default('') }}
-          --- perms/id ---
-          {{ dmgr_perm_diag.stdout | default('') }}
-          {{ dmgr_perm_diag.stderr | default('') }}
+- name: Show resolved DMGR wsadmin.sh path
+  ansible.builtin.debug:
+    msg:
+      - "Resolved wsadmin.sh on {{ was_dmgr_host }}: {{ was_resolved_wsadmin_path }}"
+      - "Derived wsadmin.traceout path: {{ was_resolved_wsadmin_trace_path }}"
   run_once: true
+  become: false
 
 # ----------------------------------------------------------------------------
 # 3) Stage wsadmin scripts to /tmp (no root required)
@@ -241,7 +221,7 @@
     - name: Collect diagnostic - tail wsadmin.traceout (if present)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        f="{{ was_dmgr_profile }}/logs/wsadmin.traceout" &&
+        f="{{ was_resolved_wsadmin_trace_path }}" &&
         if [ -f "$f" ]; then tail -n 120 "$f"; else echo "No wsadmin.traceout at $f"; fi
       args:
         executable: /bin/bash
@@ -284,8 +264,8 @@
 - name: Discover application servers via DMGR (run as wsadmin)
   ansible.builtin.shell: >
     set -euo pipefail &&
-    {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
-    ./wsadmin.sh -quiet -lang jython
+    {{ was_su_wsadmin_prefix }} "'{{ was_resolved_wsadmin_path }}'
+    -quiet -lang jython
     -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port | default(8879) }}'
     -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
     -f '{{ was_wsadmin_stage_dir }}/discover_targets.py'
@@ -315,7 +295,7 @@
     - name: Tail wsadmin.traceout after discovery failure (if present)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        f="{{ was_dmgr_profile }}/logs/wsadmin.traceout" &&
+        f="{{ was_resolved_wsadmin_trace_path }}" &&
         if [ -f "$f" ]; then tail -n 180 "$f"; else echo "No wsadmin.traceout at $f"; fi
       args:
         executable: /bin/bash
@@ -339,7 +319,6 @@
 # ----------------------------------------------------------------------------
 - name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
-    # Extract the dict/JSON structure from the output
     was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
   run_once: true
   become: false
