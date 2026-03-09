@@ -46,7 +46,7 @@
     was_stop_nodeagent: "true"
 
     was_was_roots:
-      - /opt/WebSphere/AppServer
+      - /opt/WebSphere/AppServer/profiles
 
     was_dmgr_profile_name_hints:
       - Dmgr
@@ -67,35 +67,10 @@
       - Custom
 
   tasks:
-    # ==========================================================================
-    # Pre-flight: Safety, validation, su-wsadmin test, SOAP check, discovery
-    # ==========================================================================
     - name: Include shared pre-flight tasks
       ansible.builtin.include_tasks:
         file: was_preflight_common.yml
 
-    # ==========================================================================
-    # Resolve wsadmin.sh on the DMGR host
-    # ==========================================================================
-    - name: Resolve wsadmin.sh path on the DMGR host
-      ansible.builtin.include_tasks:
-        file: was_resolve_was_scripts.yml
-      vars:
-        was_resolve_delegate_host: "{{ was_dmgr_host }}"
-        was_resolve_find_filename: "wsadmin.sh"
-        was_resolve_result_var: "was_resolved_wsadmin_path"
-        was_resolve_profile_hints: "{{ was_dmgr_profile_name_hints }}"
-      run_once: true
-
-    - name: Show resolved wsadmin.sh path
-      ansible.builtin.debug:
-        msg: "Resolved wsadmin.sh on {{ was_dmgr_host }}: {{ was_resolved_wsadmin_path }}"
-      run_once: true
-      become: false
-
-    # ==========================================================================
-    # Stop discovered application servers (one at a time)
-    # ==========================================================================
     - name: Stop discovered application servers (one at a time; run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
@@ -140,9 +115,6 @@
       run_once: true
       become: false
 
-    # ==========================================================================
-    # Resolve stopNode.sh on each host
-    # ==========================================================================
     - name: Resolve stopNode.sh path on this host
       when: was_stop_nodeagent | bool
       ansible.builtin.include_tasks:
@@ -159,9 +131,6 @@
         msg: "Resolved stopNode.sh on {{ inventory_hostname }}: {{ was_resolved_stopnode_path }}"
       become: false
 
-    # ==========================================================================
-    # Stop nodeagent on each host (optional, common before reboot)
-    # ==========================================================================
     - name: Stop nodeagent on this host (optional; run as wsadmin)
       when: was_stop_nodeagent | bool
       ansible.builtin.shell: >
