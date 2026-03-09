@@ -56,12 +56,12 @@
 
     - name: Reboot host
       ansible.builtin.reboot:
-        reboot_command: "/usr/bin/systemctl --check-inhibitors=no reboot"
-        reboot_timeout: "{{ was_reboot_timeout_sec }}"
-        connect_timeout: "{{ was_reboot_connect_timeout_sec }}"
-        pre_reboot_delay: "{{ was_reboot_pre_delay_sec }}"
-        post_reboot_delay: "{{ was_reboot_post_delay_sec }}"
-        test_command: "{{ was_reboot_test_command }}"
+        reboot_command: "/usr/bin/systemctl --force --force reboot"
+        reboot_timeout: "{{ was_reboot_timeout_sec | default(1800) }}"
+        connect_timeout: "{{ was_reboot_connect_timeout_sec | default(10) }}"
+        pre_reboot_delay: "{{ was_reboot_pre_delay_sec | default(0) }}"
+        post_reboot_delay: "{{ was_reboot_post_delay_sec | default(10) }}"
+        test_command: "{{ was_reboot_test_command | default('whoami') }}"
       become: true
       become_method: sudo
 
