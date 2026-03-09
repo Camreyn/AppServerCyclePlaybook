@@ -56,21 +56,34 @@
       - /opt/WebSphere/AppServer/profiles
 
     was_dmgr_profile_name_hints:
+      - dmgr
       - Dmgr
       - DMGR
+      - deploymentmanager
       - DeploymentManager
+      - deploymanager
       - DeployManager
+      - manager
       - Manager
+      - cellmanager
       - CellManager
 
     was_node_profile_name_hints:
+      - proc
       - Proc
+      - procserv
       - ProcServ
+      - procserver
       - ProcServer
+      - processserver
       - ProcessServer
+      - appsrv
       - AppSrv
+      - appserver
       - AppServer
+      - node
       - Node
+      - custom
       - Custom
 
   tasks:
