@@ -23,7 +23,6 @@
 - name: Reboot limited tier hosts (OS reboot between WAS stop/start)
   hosts: was_all_nodes
   gather_facts: false
-  serial: 1
 
   vars:
     was_reboot_precheck_timeout_sec: 120
