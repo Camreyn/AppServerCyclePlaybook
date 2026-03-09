@@ -8,7 +8,7 @@
 #   2. Resolves the actual wsadmin.sh path on the DMGR host
 #   3. Discovers application servers for nodes in scope
 #   4. Stops each discovered application server via wsadmin
-#   5. Resolves the actual stopNode.sh path on each node host
+#   5. Resolves the actual stopNode.sh path on each host
 #   6. Optionally stops the nodeagent on each host
 #
 # Required variables:
@@ -19,13 +19,12 @@
 #   - was_allow_disruptive: Must be true to proceed (safety gate)
 #
 # Optional variables:
-#   - was_run_user: OS user to run wsadmin as (default: wsadmin)
+#   - was_run_user: OS user to run scripts as (default: wsadmin)
 #   - was_dmgr_soap_port: DMGR SOAP port (default: 8879)
 #   - was_dmgr_soap_wait_timeout_sec: Timeout waiting for SOAP port (default: 300)
 #   - was_poll_timeout_sec: Timeout for server stop operation (default: 600)
 #   - was_poll_delay_sec: Delay between state checks (default: 5)
 #   - was_stop_nodeagent: Whether to stop nodeagent after servers (default: true)
-#   - was_profile_name_hints: Optional list of profile-name prefixes to prefer
 # =============================================================================
 
 - name: Stop discovered WAS application servers on limited tier hosts
@@ -34,39 +33,38 @@
   serial: 1
 
   vars:
-    # OS user that should run wsadmin.sh / stopNode.sh
     was_run_user: "wsadmin"
-
-    # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
-    # This matches the command-line pattern: sudo su - wsadmin -c "command"
     was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
-
-    # Where we stage Jython scripts on the DMGR host (no root required)
     was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
 
-    # DMGR SOAP configuration
     was_dmgr_soap_port: "8879"
     was_dmgr_soap_wait_timeout_sec: "300"
 
-    # Server control timeouts
     was_poll_timeout_sec: "600"
     was_poll_delay_sec: "5"
 
-    # Optional behavior toggles
     was_stop_nodeagent: "true"
 
-    # WebSphere install roots to search
     was_was_roots:
       - /opt/WebSphere/AppServer
 
-    # Profile naming families to prefer when multiple profiles exist
-    was_profile_name_hints:
+    was_dmgr_profile_name_hints:
+      - Dmgr
+      - DMGR
+      - DeploymentManager
+      - DeployManager
+      - Manager
+      - CellManager
+
+    was_node_profile_name_hints:
       - Proc
       - ProcServ
       - ProcServer
       - ProcessServer
       - AppSrv
       - AppServer
+      - Node
+      - Custom
 
   tasks:
     # ==========================================================================
@@ -86,6 +84,7 @@
         was_resolve_delegate_host: "{{ was_dmgr_host }}"
         was_resolve_find_filename: "wsadmin.sh"
         was_resolve_result_var: "was_resolved_wsadmin_path"
+        was_resolve_profile_hints: "{{ was_dmgr_profile_name_hints }}"
       run_once: true
 
     - name: Show resolved wsadmin.sh path
@@ -118,7 +117,20 @@
       loop_control:
         label: "{{ item.node }}/{{ item.server }}"
       run_once: true
-      changed_when: (stop_out.stdout | default('')) is search('CHANGED:true')
+      changed_when: >
+        (
+          (stop_out.stdout | default('')) is search('CHANGED:true')
+        ) or
+        (
+          stop_out.results is defined and
+          (
+            stop_out.results
+            | map(attribute='stdout')
+            | select('search', 'CHANGED:true')
+            | list
+            | length
+          ) > 0
+        )
       failed_when: stop_out.rc != 0
       become: false
 
@@ -139,6 +151,7 @@
         was_resolve_delegate_host: "{{ inventory_hostname }}"
         was_resolve_find_filename: "stopNode.sh"
         was_resolve_result_var: "was_resolved_stopnode_path"
+        was_resolve_profile_hints: "{{ was_node_profile_name_hints }}"
 
     - name: Show resolved stopNode.sh path
       when: was_stop_nodeagent | bool
