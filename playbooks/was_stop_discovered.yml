@@ -4,17 +4,17 @@
 # Stop discovered WAS application servers on limited tier hosts
 #
 # This playbook:
-#   1. Runs pre-flight checks (su-to-wsadmin, DMGR SOAP, script staging)
-#   2. Discovers application servers for nodes in scope
-#   3. Stops each discovered application server via wsadmin
-#   4. Optionally stops the nodeagent on each host
+#   1. Runs pre-flight checks (shared include)
+#   2. Resolves the actual wsadmin.sh path on the DMGR host
+#   3. Discovers application servers for nodes in scope
+#   4. Stops each discovered application server via wsadmin
+#   5. Resolves the actual stopNode.sh path on each node host
+#   6. Optionally stops the nodeagent on each host
 #
 # Required variables:
 #   - was_dmgr_host: DMGR hostname (delegate target)
-#   - was_dmgr_profile: Path to DMGR profile (e.g., /opt/WebSphere/AppServer/profiles/Dmgr01)
 #   - was_wsadmin_user: wsadmin SOAP authentication user
 #   - was_wsadmin_pass: wsadmin SOAP authentication password
-#   - was_node_profile_path: Per-host path to node profile
 #   - was_node_name: Per-host WebSphere node name
 #   - was_allow_disruptive: Must be true to proceed (safety gate)
 #
@@ -25,6 +25,7 @@
 #   - was_poll_timeout_sec: Timeout for server stop operation (default: 600)
 #   - was_poll_delay_sec: Delay between state checks (default: 5)
 #   - was_stop_nodeagent: Whether to stop nodeagent after servers (default: true)
+#   - was_profile_name_hints: Optional list of profile-name prefixes to prefer
 # =============================================================================
 
 - name: Stop discovered WAS application servers on limited tier hosts
@@ -33,7 +34,7 @@
   serial: 1
 
   vars:
-    # OS user that should run wsadmin.sh
+    # OS user that should run wsadmin.sh / stopNode.sh
     was_run_user: "wsadmin"
 
     # Wrapper: run a command as wsadmin via sudo su (no Ansible become required)
@@ -54,6 +55,19 @@
     # Optional behavior toggles
     was_stop_nodeagent: "true"
 
+    # WebSphere install roots to search
+    was_was_roots:
+      - /opt/WebSphere/AppServer
+
+    # Profile naming families to prefer when multiple profiles exist
+    was_profile_name_hints:
+      - Proc
+      - ProcServ
+      - ProcServer
+      - ProcessServer
+      - AppSrv
+      - AppServer
+
   tasks:
     # ==========================================================================
     # Pre-flight: Safety, validation, su-wsadmin test, SOAP check, discovery
@@ -63,13 +77,31 @@
         file: was_preflight_common.yml
 
     # ==========================================================================
+    # Resolve wsadmin.sh on the DMGR host
+    # ==========================================================================
+    - name: Resolve wsadmin.sh path on the DMGR host
+      ansible.builtin.include_tasks:
+        file: was_resolve_was_scripts.yml
+      vars:
+        was_resolve_delegate_host: "{{ was_dmgr_host }}"
+        was_resolve_find_filename: "wsadmin.sh"
+        was_resolve_result_var: "was_resolved_wsadmin_path"
+      run_once: true
+
+    - name: Show resolved wsadmin.sh path
+      ansible.builtin.debug:
+        msg: "Resolved wsadmin.sh on {{ was_dmgr_host }}: {{ was_resolved_wsadmin_path }}"
+      run_once: true
+      become: false
+
+    # ==========================================================================
     # Stop discovered application servers (one at a time)
     # ==========================================================================
     - name: Stop discovered application servers (one at a time; run as wsadmin)
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix }} "cd '{{ was_dmgr_profile }}/bin' &&
-        ./wsadmin.sh -quiet -lang jython
+        {{ was_su_wsadmin_prefix }} "'{{ was_resolved_wsadmin_path }}'
+        -quiet -lang jython
         -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
         -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
         -f '{{ was_wsadmin_stage_dir }}/control_server.py'
@@ -97,13 +129,31 @@
       become: false
 
     # ==========================================================================
+    # Resolve stopNode.sh on each host
+    # ==========================================================================
+    - name: Resolve stopNode.sh path on this host
+      when: was_stop_nodeagent | bool
+      ansible.builtin.include_tasks:
+        file: was_resolve_was_scripts.yml
+      vars:
+        was_resolve_delegate_host: "{{ inventory_hostname }}"
+        was_resolve_find_filename: "stopNode.sh"
+        was_resolve_result_var: "was_resolved_stopnode_path"
+
+    - name: Show resolved stopNode.sh path
+      when: was_stop_nodeagent | bool
+      ansible.builtin.debug:
+        msg: "Resolved stopNode.sh on {{ inventory_hostname }}: {{ was_resolved_stopnode_path }}"
+      become: false
+
+    # ==========================================================================
     # Stop nodeagent on each host (optional, common before reboot)
     # ==========================================================================
     - name: Stop nodeagent on this host (optional; run as wsadmin)
       when: was_stop_nodeagent | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
-        {{ was_su_wsadmin_prefix }} "{{ was_node_profile_path }}/bin/stopNode.sh
+        {{ was_su_wsadmin_prefix }} "'{{ was_resolved_stopnode_path }}'
         -username '{{ was_wsadmin_user }}'
         -password '{{ was_wsadmin_pass }}'"
       args:
