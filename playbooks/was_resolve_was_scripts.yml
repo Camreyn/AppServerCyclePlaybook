@@ -60,7 +60,7 @@
       {{
         (
           was_script_direct_candidates
-          | select('search', '/profiles/(' ~ was_profile_hint_regex ~ ')[^/]*/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
+          | select('search', '(?i)/profiles/(' ~ was_profile_hint_regex ~ ')[^/]*/bin/' ~ (was_resolve_find_filename | regex_escape) ~ '$')
           | list
         )
         if (was_profile_hint_regex | length > 0)
