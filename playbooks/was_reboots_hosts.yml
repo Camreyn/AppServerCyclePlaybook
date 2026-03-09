@@ -56,7 +56,7 @@
 
     - name: Reboot host
       ansible.builtin.reboot:
-        reboot_command: "{{ was_reboot_command }}"
+        reboot_command: "/usr/bin/systemctl --check-inhibitors=no reboot"
         reboot_timeout: "{{ was_reboot_timeout_sec }}"
         connect_timeout: "{{ was_reboot_connect_timeout_sec }}"
         pre_reboot_delay: "{{ was_reboot_pre_delay_sec }}"
@@ -64,7 +64,6 @@
         test_command: "{{ was_reboot_test_command }}"
       become: true
       become_method: sudo
-      register: reboot_result
 
     - name: Wait for SSH connectivity (post-reboot)
       ansible.builtin.wait_for_connection:
