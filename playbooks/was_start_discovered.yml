@@ -53,7 +53,7 @@
     was_verify_after_start: "true"
 
     was_was_roots:
-      - /opt/WebSphere/AppServer
+      - /opt/WebSphere/AppServer/profiles
 
     was_dmgr_profile_name_hints:
       - Dmgr
