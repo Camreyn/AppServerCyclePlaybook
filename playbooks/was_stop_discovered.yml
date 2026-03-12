@@ -30,7 +30,6 @@
 - name: Stop discovered WAS application servers on limited tier hosts
   hosts: was_all_nodes
   gather_facts: false
-  serial: 1
 
   vars:
     was_run_user: "wsadmin"
