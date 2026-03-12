@@ -32,7 +32,6 @@
 - name: Validate discovered WAS/BAW servers (non-disruptive pre-flight check)
   hosts: was_all_nodes
   gather_facts: false
-  serial: 1
 
   vars:
     # OS user that should run wsadmin.sh
