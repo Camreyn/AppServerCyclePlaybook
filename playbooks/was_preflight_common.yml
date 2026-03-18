@@ -46,8 +46,11 @@
   ansible.builtin.set_fact:
     was_resolved_wsadmin_trace_path: >-
       {{
-        was_resolved_wsadmin_path
-        | regex_replace('/bin/wsadmin\\.sh$', '/logs/wsadmin.traceout')
+        (
+          was_resolved_wsadmin_path
+          | dirname
+          | dirname
+        ) ~ '/logs/wsadmin.traceout'
       }}
   run_once: true
   become: false
