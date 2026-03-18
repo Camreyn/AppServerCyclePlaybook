@@ -288,6 +288,14 @@
       ansible.builtin.fail:
         msg: |
           Discover application servers via DMGR failed.
+          rc={{ discovery_out.rc }}
+
+          --- discovery stdout ---
+          {{ discovery_out.stdout | default('') }}
+
+          --- discovery stderr ---
+          {{ discovery_out.stderr | default('') }}
+
           --- wsadmin.traceout tail ---
           {{ wsadmin_trace_after_discovery.stdout | default('') }}
           {{ wsadmin_trace_after_discovery.stderr | default('') }}
