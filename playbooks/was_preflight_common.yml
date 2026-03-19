@@ -302,7 +302,7 @@
           --- wsadmin.traceout tail ---
           {{ wsadmin_trace_after_discovery.stdout | default('') }}
           {{ wsadmin_trace_after_discovery.stderr | default('') }}
-  run_once: true
+      run_once: true
 
 - name: Extract JSON payload from wsadmin output
   ansible.builtin.set_fact:
