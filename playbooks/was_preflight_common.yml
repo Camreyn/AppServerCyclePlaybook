@@ -46,16 +46,12 @@
   ansible.builtin.set_fact:
     was_resolved_wsadmin_trace_path: >-
       {{
-        (
-          was_resolved_wsadmin_path
-          | dirname
-          | dirname
-        ) ~ '/logs/wsadmin.traceout'
+        (was_resolved_wsadmin_path | dirname | dirname) ~ '/logs/wsadmin.traceout'
       }}
   run_once: true
   become: false
 
-- name: Show resolved DMGR wsadmin.sh path
+- name: Show resolved DMGR wsadmin paths
   ansible.builtin.debug:
     msg:
       - "Resolved wsadmin.sh on {{ was_dmgr_host }}: {{ was_resolved_wsadmin_path }}"
@@ -243,6 +239,15 @@
   run_once: true
   become: false
 
+- name: Show play hosts and resolved node names
+  ansible.builtin.debug:
+    msg:
+      - "ansible_play_hosts={{ ansible_play_hosts }}"
+      - "host_to_node={{ dict(ansible_play_hosts | zip(ansible_play_hosts | map('extract', hostvars, 'was_node_name'))) }}"
+      - "was_nodes_in_scope={{ was_nodes_in_scope }}"
+  run_once: true
+  become: false
+
 - name: Discover application servers via DMGR (run as wsadmin)
   ansible.builtin.shell: >
     set -euo pipefail &&
@@ -268,8 +273,10 @@
       ansible.builtin.debug:
         msg: |
           Discovery failed rc={{ discovery_out.rc }}
+
           --- stdout ---
           {{ discovery_out.stdout | default('') }}
+
           --- stderr ---
           {{ discovery_out.stderr | default('') }}
       run_once: true
@@ -302,28 +309,26 @@
           --- wsadmin.traceout tail ---
           {{ wsadmin_trace_after_discovery.stdout | default('') }}
           {{ wsadmin_trace_after_discovery.stderr | default('') }}
-      run_once: true
+  run_once: true
 
-- name: Extract JSON payload from wsadmin output
+- name: Extract last JSON line from wsadmin output
   ansible.builtin.set_fact:
-    was_discovery_json_extracted: "{{ discovery_out.stdout | default('') | regex_search('\\{[\"\\x27]targets[\"\\x27]\\s*:\\s*\\[.*\\]\\}') | default('') }}"
+    was_discovery_json_extracted: >-
+      {{
+        (
+          discovery_out.stdout_lines | default([])
+          | select('match', '^\{"targets":.*\}$')
+          | list
+          | last
+        ) | default('')
+      }}
   run_once: true
   become: false
 
-- name: Use extracted payload directly (if already a dict)
-  when: was_discovery_json_extracted | type_debug == 'dict'
+- name: Parse discovery JSON
+  when: was_discovery_json_extracted | length > 0
   ansible.builtin.set_fact:
-    was_discovery_json: "{{ was_discovery_json_extracted }}"
-  run_once: true
-  become: false
-
-- name: Parse as JSON string (if still a string)
-  when: was_discovery_json_extracted | type_debug == 'str' and was_discovery_json_extracted | length > 15
-  vars:
-    single_quote: "'"
-    double_quote: '"'
-  ansible.builtin.set_fact:
-    was_discovery_json: "{{ was_discovery_json_extracted | replace(single_quote, double_quote) | from_json }}"
+    was_discovery_json: "{{ was_discovery_json_extracted | from_json }}"
   run_once: true
   become: false
 
@@ -334,15 +339,35 @@
       - was_discovery_json.targets is defined
     fail_msg: |
       wsadmin output did not contain a valid JSON object.
-      Extracted type: {{ was_discovery_json_extracted | type_debug }}
-      --- Full stdout (first 800 chars) ---
-      {{ (discovery_out.stdout | default(''))[:800] }}
+      Extracted line: {{ was_discovery_json_extracted | default('') }}
+      --- Full stdout (first 1200 chars) ---
+      {{ (discovery_out.stdout | default(''))[:1200] }}
+      --- Full stderr (first 1200 chars) ---
+      {{ (discovery_out.stderr | default(''))[:1200] }}
   run_once: true
   become: false
 
 - name: Build discovered target list
   ansible.builtin.set_fact:
     was_discovered_targets_all: "{{ was_discovery_json.targets | default([]) }}"
+  run_once: true
+  become: false
+
+- name: Show discovery errors, if any
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        was_discovered_targets_all
+        | rejectattr('server', 'defined')
+        | list
+      }}
+  when: >
+    (
+      was_discovered_targets_all
+      | rejectattr('server', 'defined')
+      | list
+      | length
+    ) > 0
   run_once: true
   become: false
 
@@ -371,6 +396,13 @@
 
 - name: Show discovered targets
   ansible.builtin.debug:
-    msg: "Discovered {{ was_discovered_targets | length }} application server(s): {{ was_discovered_targets | map(attribute='server') | list }}"
+    msg: >-
+      {{
+        was_discovered_targets
+        | map(attribute='node')
+        | zip(was_discovered_targets | map(attribute='server'))
+        | map('join', '/')
+        | list
+      }}
   run_once: true
   become: false
