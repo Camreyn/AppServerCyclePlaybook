@@ -11,11 +11,12 @@
 #   5. Verifies deploy can su to wsadmin on the DMGR host
 #   6. Builds the node list from the hosts in scope
 #   7. Discovers application servers dynamically through the DMGR
-#   8. Optionally starts nodeagents on each host
-#   9. Waits until each nodeagent is actually STARTED/RUNNING
-#  10. Starts each discovered application server via wsadmin
-#  11. Verifies each discovered application server is RUNNING/STARTED
-#  12. Prints a summary and fails if any discovered target did not verify
+#   8. Shows a per-node discovery summary
+#   9. Optionally starts nodeagents on each host
+#  10. Waits until each nodeagent is actually STARTED/RUNNING
+#  11. Starts each discovered application server via wsadmin
+#  12. Verifies each discovered application server is RUNNING/STARTED
+#  13. Prints a summary and fails if any discovered target did not verify
 #
 # Required variables:
 #   - was_dmgr_host
@@ -502,6 +503,25 @@
         fail_msg: >
           Discovery returned zero application servers for nodes {{ was_nodes_in_scope }}.
           Check was_node_name host_vars and DMGR visibility.
+      run_once: true
+      become: false
+
+    - name: Build per-node discovery summary
+      ansible.builtin.set_fact:
+        was_discovery_summary_lines: |
+          {% for node_name in was_nodes_in_scope %}
+          - {{ node_name }}:
+            requested=true
+            discovered_appservers={{ (was_discovered_targets | selectattr('node', 'equalto', node_name) | list | length) }}
+            discovery_errors={{ (was_discovered_targets_all | selectattr('node', 'equalto', node_name) | rejectattr('server', 'defined') | list) }}
+            discovered_servers={{ (was_discovered_targets | selectattr('node', 'equalto', node_name) | map(attribute='server') | list) }}
+          {% endfor %}
+      run_once: true
+      become: false
+
+    - name: Show per-node discovery summary
+      ansible.builtin.debug:
+        msg: "{{ was_discovery_summary_lines.split('\n') }}"
       run_once: true
       become: false
 
