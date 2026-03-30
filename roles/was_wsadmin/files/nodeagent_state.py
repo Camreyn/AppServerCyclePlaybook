@@ -40,7 +40,7 @@ def _state(node):
         return "NOT_FOUND"
     try:
         return AdminControl.getAttribute(mbean, "state")
-    except:
+    except Exception:
         return "UNKNOWN"
 
 
@@ -55,7 +55,7 @@ def main():
 
 try:
     main()
-except:
+except Exception:
     t, v = sys.exc_info()[:2]
     sys.stderr.write("ERROR: %s\n" % v)
     sys.exit(2)
