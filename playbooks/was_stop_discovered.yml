@@ -4,27 +4,25 @@
 # Stop discovered WAS application servers on limited tier hosts
 #
 # This playbook:
-#   1. Runs pre-flight checks (shared include)
-#   2. Resolves the actual wsadmin.sh path on the DMGR host
-#   3. Discovers application servers for nodes in scope
-#   4. Stops each discovered application server via wsadmin
-#   5. Resolves the actual stopNode.sh path on each host
-#   6. Optionally stops the nodeagent on each host
+#   1. Runs shared pre-flight checks and discovery
+#   2. Stops each discovered application server via wsadmin on the DMGR host
+#   3. Resolves stopNode.sh on each target host
+#   4. Optionally stops the nodeagent on each host
 #
 # Required variables:
-#   - was_dmgr_host: DMGR hostname (delegate target)
-#   - was_wsadmin_user: wsadmin SOAP authentication user
-#   - was_wsadmin_pass: wsadmin SOAP authentication password
-#   - was_node_name: Per-host WebSphere node name
-#   - was_allow_disruptive: Must be true to proceed (safety gate)
+#   - was_dmgr_host
+#   - was_wsadmin_user
+#   - was_wsadmin_pass
+#   - was_node_name
+#   - was_allow_disruptive
 #
 # Optional variables:
-#   - was_run_user: OS user to run scripts as (default: wsadmin)
-#   - was_dmgr_soap_port: DMGR SOAP port (default: 8879)
-#   - was_dmgr_soap_wait_timeout_sec: Timeout waiting for SOAP port (default: 300)
-#   - was_poll_timeout_sec: Timeout for server stop operation (default: 600)
-#   - was_poll_delay_sec: Delay between state checks (default: 5)
-#   - was_stop_nodeagent: Whether to stop nodeagent after servers (default: true)
+#   - was_run_user (default: wsadmin)
+#   - was_dmgr_soap_port (default: 8879)
+#   - was_dmgr_soap_wait_timeout_sec (default: 300)
+#   - was_poll_timeout_sec (default: 600)
+#   - was_poll_delay_sec (default: 5)
+#   - was_stop_nodeagent (default: true)
 # =============================================================================
 
 - name: Stop discovered WAS application servers on limited tier hosts
@@ -32,17 +30,17 @@
   gather_facts: false
 
   vars:
-    was_run_user: "wsadmin"
+    was_run_user: wsadmin
     was_su_wsadmin_prefix: "sudo su - {{ was_run_user }} -c"
-    was_wsadmin_stage_dir: "/tmp/was_wsadmin_scripts"
+    was_wsadmin_stage_dir: /tmp/was_wsadmin_scripts
 
-    was_dmgr_soap_port: "8879"
-    was_dmgr_soap_wait_timeout_sec: "300"
+    was_dmgr_soap_port: 8879
+    was_dmgr_soap_wait_timeout_sec: 300
 
-    was_poll_timeout_sec: "600"
-    was_poll_delay_sec: "5"
+    was_poll_timeout_sec: 600
+    was_poll_delay_sec: 5
 
-    was_stop_nodeagent: "true"
+    was_stop_nodeagent: true
 
     was_was_roots:
       - /opt/WebSphere/AppServer/profiles
@@ -83,7 +81,20 @@
       ansible.builtin.include_tasks:
         file: was_preflight_common.yml
 
-    - name: Stop discovered application servers
+    - name: Show discovered targets prior to stop
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            was_discovered_targets
+            | map(attribute='node')
+            | zip(was_discovered_targets | map(attribute='server'))
+            | map('join', '/')
+            | list
+          }}
+      run_once: true
+      become: false
+
+    - name: Stop discovered application servers via DMGR
       ansible.builtin.shell: >
         set -euo pipefail &&
         {{ was_su_wsadmin_prefix }} "'{{ was_resolved_wsadmin_path }}'
@@ -111,6 +122,7 @@
     - name: Show stop results
       ansible.builtin.debug:
         msg: "{{ stop_out.results | map(attribute='stdout_lines') | list }}"
+      when: stop_out.results is defined
       run_once: true
       become: false
 
@@ -120,8 +132,8 @@
         file: was_resolve_was_scripts.yml
       vars:
         was_resolve_delegate_host: "{{ inventory_hostname }}"
-        was_resolve_find_filename: "stopNode.sh"
-        was_resolve_result_var: "was_resolved_stopnode_path"
+        was_resolve_find_filename: stopNode.sh
+        was_resolve_result_var: was_resolved_stopnode_path
         was_resolve_profile_hints: "{{ was_node_profile_name_hints }}"
 
     - name: Show resolved stopNode.sh path
@@ -130,7 +142,7 @@
         msg: "Resolved stopNode.sh on {{ inventory_hostname }}: {{ was_resolved_stopnode_path }}"
       become: false
 
-    - name: Stop nodeagent on this host (optional; run as wsadmin)
+    - name: Stop nodeagent on this host
       when: was_stop_nodeagent | bool
       ansible.builtin.shell: >
         set -euo pipefail &&
@@ -140,7 +152,9 @@
       args:
         executable: /bin/bash
       register: nodeagent_stop
-      changed_when: nodeagent_stop.rc == 0
+      changed_when: >
+        ("already stopped" not in (nodeagent_stop.stdout | default('') | lower)) and
+        ("not running" not in (nodeagent_stop.stdout | default('') | lower))
       failed_when: >
         nodeagent_stop.rc != 0 and
         ("ADMU0116I" not in (nodeagent_stop.stdout | default(''))) and
@@ -151,5 +165,7 @@
     - name: Show nodeagent stop result
       when: was_stop_nodeagent | bool
       ansible.builtin.debug:
-        msg: "Nodeagent stop on {{ inventory_hostname }}: rc={{ nodeagent_stop.rc }}"
+        msg:
+          - "Nodeagent stop on {{ inventory_hostname }}: rc={{ nodeagent_stop.rc }}"
+          - "stdout={{ nodeagent_stop.stdout_lines | default([]) }}"
       become: false
