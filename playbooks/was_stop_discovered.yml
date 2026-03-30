@@ -5,9 +5,11 @@
 #
 # This playbook:
 #   1. Runs shared pre-flight checks and discovery
-#   2. Stops each discovered application server via wsadmin on the DMGR host
-#   3. Resolves stopNode.sh on each target host
-#   4. Optionally stops the nodeagent on each host
+#   2. Shows a per-node discovery summary
+#   3. Stops each discovered application server via wsadmin on the DMGR host
+#   4. Resolves stopNode.sh on each target host
+#   5. Optionally stops the nodeagent on each host
+#   6. Prints a final stop summary
 #
 # Required variables:
 #   - was_dmgr_host
@@ -81,6 +83,25 @@
       ansible.builtin.include_tasks:
         file: was_preflight_common.yml
 
+    - name: Build per-node discovery summary
+      ansible.builtin.set_fact:
+        was_discovery_summary_lines: |
+          {% for node_name in was_nodes_in_scope %}
+          - {{ node_name }}:
+            requested=true
+            discovered_appservers={{ (was_discovered_targets | selectattr('node', 'equalto', node_name) | list | length) }}
+            discovery_errors={{ (was_discovered_targets_all | selectattr('node', 'equalto', node_name) | rejectattr('server', 'defined') | list) }}
+            discovered_servers={{ (was_discovered_targets | selectattr('node', 'equalto', node_name) | map(attribute='server') | list) }}
+          {% endfor %}
+      run_once: true
+      become: false
+
+    - name: Show per-node discovery summary
+      ansible.builtin.debug:
+        msg: "{{ was_discovery_summary_lines.split('\n') }}"
+      run_once: true
+      become: false
+
     - name: Show discovered targets prior to stop
       ansible.builtin.debug:
         msg: >-
@@ -126,6 +147,42 @@
       run_once: true
       become: false
 
+    - name: Build stop-attempt summary
+      when: stop_out.results is defined
+      ansible.builtin.set_fact:
+        was_stop_attempt_successes: >-
+          {{
+            stop_out.results
+            | rejectattr('rc', 'ne', 0)
+            | map(attribute='item')
+            | map(attribute='node')
+            | zip(
+                stop_out.results
+                | rejectattr('rc', 'ne', 0)
+                | map(attribute='item')
+                | map(attribute='server')
+              )
+            | map('join', '/')
+            | list
+          }}
+        was_stop_attempt_failures: >-
+          {{
+            stop_out.results
+            | selectattr('rc', 'ne', 0)
+            | map(attribute='item')
+            | map(attribute='node')
+            | zip(
+                stop_out.results
+                | selectattr('rc', 'ne', 0)
+                | map(attribute='item')
+                | map(attribute='server')
+              )
+            | map('join', '/')
+            | list
+          }}
+      run_once: true
+      become: false
+
     - name: Resolve stopNode.sh path on this host
       when: was_stop_nodeagent | bool
       ansible.builtin.include_tasks:
@@ -168,4 +225,26 @@
         msg:
           - "Nodeagent stop on {{ inventory_hostname }}: rc={{ nodeagent_stop.rc }}"
           - "stdout={{ nodeagent_stop.stdout_lines | default([]) }}"
+      become: false
+
+    - name: Build nodeagent stop summary line
+      when: was_stop_nodeagent | bool
+      ansible.builtin.set_fact:
+        was_nodeagent_stop_summary_line: >-
+          {{
+            inventory_hostname ~
+            ' node=' ~ was_node_name ~
+            ' rc=' ~ (nodeagent_stop.rc | string) ~
+            ' stdout=' ~ ((nodeagent_stop.stdout_lines | default([])) | join(' | '))
+          }}
+      become: false
+
+    - name: Show final stop summary
+      ansible.builtin.debug:
+        msg:
+          - "Discovered targets: {{ was_discovered_targets | map(attribute='node') | zip(was_discovered_targets | map(attribute='server')) | map('join', '/') | list }}"
+          - "Stop attempted successfully (rc=0): {{ was_stop_attempt_successes | default([]) }}"
+          - "Stop attempts failed (rc!=0): {{ was_stop_attempt_failures | default([]) }}"
+          - "Nodeagent stop summary: {{ was_nodeagent_stop_summary_line | default('nodeagent stop not requested') }}"
+      run_once: true
       become: false
