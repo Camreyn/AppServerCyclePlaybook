@@ -12,9 +12,10 @@
 #   6. Builds the node list from the hosts in scope
 #   7. Discovers application servers dynamically through the DMGR
 #   8. Optionally starts nodeagents on each host
-#   9. Starts each discovered application server via wsadmin
-#  10. Verifies each discovered application server is RUNNING/STARTED
-#  11. Prints a summary and fails if any discovered target did not verify
+#   9. Waits until each nodeagent is actually STARTED/RUNNING
+#  10. Starts each discovered application server via wsadmin
+#  11. Verifies each discovered application server is RUNNING/STARTED
+#  12. Prints a summary and fails if any discovered target did not verify
 #
 # Required variables:
 #   - was_dmgr_host
@@ -32,6 +33,8 @@
 #   - was_start_dmgr (default: true)
 #   - was_start_nodeagent (default: true)
 #   - was_verify_after_start (default: true)
+#   - was_nodeagent_ready_retries (default: 24)
+#   - was_nodeagent_ready_delay_sec (default: 5)
 # =============================================================================
 
 - name: Start discovered WAS application servers on limited tier hosts
@@ -52,6 +55,9 @@
     was_start_dmgr: true
     was_start_nodeagent: true
     was_verify_after_start: true
+
+    was_nodeagent_ready_retries: 24
+    was_nodeagent_ready_delay_sec: 5
 
     was_was_roots:
       - /opt/WebSphere/AppServer/profiles
@@ -171,6 +177,7 @@
         - discover_targets.py
         - server_state.py
         - control_server.py
+        - nodeagent_state.py
       delegate_to: "{{ was_dmgr_host }}"
       run_once: true
       become: false
@@ -551,6 +558,45 @@
         msg:
           - "Nodeagent start on {{ inventory_hostname }}: rc={{ nodeagent_start.rc }}"
           - "stdout={{ nodeagent_start.stdout_lines | default([]) }}"
+      become: false
+
+    - name: Wait for nodeagent to report STARTED or RUNNING
+      when: was_start_nodeagent | bool
+      ansible.builtin.shell: >
+        set -euo pipefail &&
+        {{ was_su_wsadmin_prefix }} "'{{ was_resolved_wsadmin_path }}'
+        -quiet -lang jython
+        -conntype SOAP -host 127.0.0.1 -port '{{ was_dmgr_soap_port }}'
+        -user '{{ was_wsadmin_user }}' -password '{{ was_wsadmin_pass }}'
+        -f '{{ was_wsadmin_stage_dir }}/nodeagent_state.py'
+        --node '{{ was_node_name }}'"
+      args:
+        executable: /bin/bash
+      register: nodeagent_verify
+      delegate_to: "{{ was_dmgr_host }}"
+      changed_when: false
+      retries: "{{ was_nodeagent_ready_retries }}"
+      delay: "{{ was_nodeagent_ready_delay_sec }}"
+      until: >
+        nodeagent_verify.rc == 0 and
+        (
+          'STATE:STARTED' in (nodeagent_verify.stdout | default('')) or
+          'STATE:RUNNING' in (nodeagent_verify.stdout | default(''))
+        )
+      failed_when: >
+        nodeagent_verify.rc != 0 or
+        (
+          'STATE:STARTED' not in (nodeagent_verify.stdout | default('')) and
+          'STATE:RUNNING' not in (nodeagent_verify.stdout | default(''))
+        )
+      become: false
+
+    - name: Show nodeagent readiness result
+      when: was_start_nodeagent | bool
+      ansible.builtin.debug:
+        msg:
+          - "Nodeagent readiness on {{ inventory_hostname }} for node {{ was_node_name }} verified"
+          - "stdout={{ nodeagent_verify.stdout_lines | default([]) }}"
       become: false
 
     - name: Start discovered application servers via DMGR
