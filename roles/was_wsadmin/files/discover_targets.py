@@ -10,9 +10,14 @@
 #   JSON object on the last line of stdout:
 #   {"targets":[{"node":"Node01","server":"AppSrv01","serverType":"APPLICATION_SERVER"}, ...]}
 #
-# Nodes not found are reported with: {"node":"NodeX","error":"NODE_NOT_FOUND"}
+# Nodes not found are reported with:
+#   {"node":"NodeX","error":"NODE_NOT_FOUND"}
+#
+# Nodes with no application servers are reported with:
+#   {"node":"NodeX","warning":"NO_APPLICATION_SERVERS_FOUND"}
 # =============================================================================
 import sys
+
 
 def _args_after(flag):
     """Return all arguments after the specified flag."""
@@ -28,7 +33,7 @@ def _escape_json_string(s):
         s = ""
     try:
         s = str(s)
-    except:
+    except Exception:
         s = ""
 
     s = s.replace("\\", "\\\\")
@@ -44,25 +49,22 @@ def _json_value(v):
     if v is None:
         return "null"
 
-    # bool is subclass of int in Python 2; check first
     try:
         if isinstance(v, bool):
-            if v:
-                return "true"
-            return "false"
-    except:
+            return "true" if v else "false"
+    except Exception:
         pass
 
     try:
         if isinstance(v, (int, long)):
             return str(v)
-    except:
+    except Exception:
         pass
 
     try:
         if isinstance(v, float):
             return str(v)
-    except:
+    except Exception:
         pass
 
     return "\"" + _escape_json_string(v) + "\""
@@ -92,6 +94,17 @@ def _json_array_of_objects(objs):
     return "[" + ",".join(parts) + "]"
 
 
+def _safe_show_attribute(config_id, attr_name, default_value=""):
+    """Best-effort attribute lookup."""
+    try:
+        value = AdminConfig.showAttribute(config_id, attr_name)
+        if value is None:
+            return default_value
+        return value
+    except Exception:
+        return default_value
+
+
 def main():
     nodes = _args_after("--nodes")
     if not nodes:
@@ -102,40 +115,48 @@ def main():
     for node in nodes:
         node_id = AdminConfig.getid("/Node:%s/" % node)
         if not node_id:
-            results.append({"node": node, "error": "NODE_NOT_FOUND"})
+            results.append({
+                "node": node,
+                "error": "NODE_NOT_FOUND"
+            })
             continue
 
         servers = AdminConfig.list("Server", node_id)
         if not servers:
+            results.append({
+                "node": node,
+                "warning": "NO_APPLICATION_SERVERS_FOUND"
+            })
             continue
 
-        for s in servers.splitlines():
-            try:
-                stype = AdminConfig.showAttribute(s, "serverType")
-            except:
-                stype = ""
+        node_appserver_count = 0
 
+        for server_cfg in servers.splitlines():
+            stype = _safe_show_attribute(server_cfg, "serverType", "")
             if stype != "APPLICATION_SERVER":
                 continue
 
-            try:
-                sname = AdminConfig.showAttribute(s, "name")
-            except:
-                sname = ""
+            sname = _safe_show_attribute(server_cfg, "name", "")
+            if not sname:
+                continue
 
             results.append({
                 "node": node,
                 "server": sname,
                 "serverType": stype
             })
+            node_appserver_count += 1
 
-    # Build JSON output
+        if node_appserver_count == 0:
+            results.append({
+                "node": node,
+                "warning": "NO_APPLICATION_SERVERS_FOUND"
+            })
+
     out = "{"
     out += "\"targets\":" + _json_array_of_objects(results)
     out += "}"
 
-    # IMPORTANT: Write JSON on its own line for reliable parsing
-    # First flush any pending output, then write newline + JSON + newline
     sys.stdout.flush()
     sys.stdout.write("\n")
     sys.stdout.write(out)
@@ -145,7 +166,7 @@ def main():
 
 try:
     main()
-except:
+except Exception:
     t, v = sys.exc_info()[:2]
     sys.stderr.write("ERROR: %s\n" % v)
     sys.exit(2)
