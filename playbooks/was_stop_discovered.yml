@@ -83,7 +83,7 @@
       ansible.builtin.include_tasks:
         file: was_preflight_common.yml
 
-    - name: Stop discovered application servers (one at a time; run as wsadmin)
+    - name: Stop discovered application servers
       ansible.builtin.shell: >
         set -euo pipefail &&
         {{ was_su_wsadmin_prefix }} "'{{ was_resolved_wsadmin_path }}'
@@ -104,20 +104,7 @@
       loop_control:
         label: "{{ item.node }}/{{ item.server }}"
       run_once: true
-      changed_when: >
-        (
-          (stop_out.stdout | default('')) is search('CHANGED:true')
-        ) or
-        (
-          stop_out.results is defined and
-          (
-            stop_out.results
-            | map(attribute='stdout')
-            | select('search', 'CHANGED:true')
-            | list
-            | length
-          ) > 0
-        )
+      changed_when: "'CHANGED:true' in (stop_out.stdout | default(''))"
       failed_when: stop_out.rc != 0
       become: false
 
