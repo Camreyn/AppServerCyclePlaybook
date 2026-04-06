@@ -325,10 +325,23 @@
   run_once: true
   become: false
 
+- name: Show extracted discovery JSON type
+  ansible.builtin.debug:
+    msg:
+      - "was_discovery_json_extracted type={{ was_discovery_json_extracted | type_debug }}"
+      - "was_discovery_json_extracted value={{ was_discovery_json_extracted }}"
+  run_once: true
+  become: false
+
 - name: Parse discovery JSON
   when: was_discovery_json_extracted | length > 0
   ansible.builtin.set_fact:
-    was_discovery_json: "{{ was_discovery_json_extracted | from_json }}"
+    was_discovery_json: >-
+      {{
+        was_discovery_json_extracted
+        if (was_discovery_json_extracted is mapping)
+        else (was_discovery_json_extracted | from_json)
+      }}
   run_once: true
   become: false
 
