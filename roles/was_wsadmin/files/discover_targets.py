@@ -51,7 +51,10 @@ def _json_value(v):
 
     try:
         if isinstance(v, bool):
-            return "true" if v else "false"
+            if v:
+                return "true"
+            else:
+                return "false"
     except Exception:
         pass
 
@@ -80,7 +83,7 @@ def _json_obj(d):
         k = keys[i]
         v = d[k]
         parts.append("\"" + _escape_json_string(k) + "\":" + _json_value(v))
-        i += 1
+        i = i + 1
     return "{" + ",".join(parts) + "}"
 
 
@@ -90,11 +93,11 @@ def _json_array_of_objects(objs):
     i = 0
     while i < len(objs):
         parts.append(_json_obj(objs[i]))
-        i += 1
+        i = i + 1
     return "[" + ",".join(parts) + "]"
 
 
-def _safe_show_attribute(config_id, attr_name, default_value=""):
+def _safe_show_attribute(config_id, attr_name, default_value):
     """Best-effort attribute lookup."""
     try:
         value = AdminConfig.showAttribute(config_id, attr_name)
@@ -145,7 +148,7 @@ def main():
                 "server": sname,
                 "serverType": stype
             })
-            node_appserver_count += 1
+            node_appserver_count = node_appserver_count + 1
 
         if node_appserver_count == 0:
             results.append({
@@ -154,8 +157,8 @@ def main():
             })
 
     out = "{"
-    out += "\"targets\":" + _json_array_of_objects(results)
-    out += "}"
+    out = out + "\"targets\":" + _json_array_of_objects(results)
+    out = out + "}"
 
     sys.stdout.flush()
     sys.stdout.write("\n")
